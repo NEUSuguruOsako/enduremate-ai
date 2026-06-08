@@ -723,7 +723,7 @@ export default function AIAssistant() {
                 timestamp={msg.timestamp}
                 isStreaming={msg.isStreaming === true}
                 isLastInGroup={messageGrouping[index]}
-                isError={(msg as Record<string, unknown>)._isError === true}
+                isError={(msg as unknown as Record<string, unknown>)._isError === true}
               />
             ),
           )}

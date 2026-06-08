@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAppContext } from '../context/AppContext'
+import { useAppContext, type TrainingItem } from '../context/AppContext'
 import { useNavigate } from 'react-router-dom'
 
 const phaseDescriptions = [
