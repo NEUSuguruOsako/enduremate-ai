@@ -135,14 +135,9 @@ function UserBubble({ msg, isLastInGroup }: UserBubbleProps) {
 // ========================
 
 export default function AIAssistant() {
-  // ---- 必须在所有其他 hooks 之前检查 isAIChatOpen ----
-  const { isAIChatOpen } = useAppContext()
-  
-  /** 面板关闭时不渲染任何内容（FAB 按钮在 Layout.tsx 中） */
-  if (!isAIChatOpen) return null
-
-  // ---- 现在可以安全地使用其他 hooks ----
+  // ---- 所有 Hooks 必须在条件返回之前调用（React Hooks 规则） ----
   const {
+    isAIChatOpen,
     aiMessages,
     setAiMessages,
     toggleAIChat,
@@ -154,8 +149,26 @@ export default function AIAssistant() {
     uploadedFiles,
   } = useAppContext()
 
+  // ---- Refs ----
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const streamGeneratorRef = useRef<AsyncGenerator<string, void, unknown> | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
   // ---- 面板状态 ----
   const [panelVisible, setPanelVisible] = useState(false)
+  const [inputValue, setInputValue] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY_API_KEY) || '')
+  const [apiKeyInput, setApiKeyInput] = useState(() => localStorage.getItem(STORAGE_KEY_API_KEY) || '')
+  const [apiKeySaved, setApiKeySaved] = useState(() => !!localStorage.getItem(STORAGE_KEY_API_KEY))
+  const [showSettings, setShowSettings] = useState(false)
+
+  // ---- 快捷提问列表（根据是否有训练数据切换） ----
+  const quickQuestions = useMemo(() => {
+    return hasTrainingData ? defaultQuickQuestions : beginnerQuickQuestions
+  }, [hasTrainingData])
 
   // ---- 面板入场动画（从右侧滑入） ----
 
@@ -169,6 +182,9 @@ export default function AIAssistant() {
       return () => clearTimeout(timer)
     }
   }, [isAIChatOpen])
+
+  // ---- 面板关闭时不渲染任何内容（此检查必须在所有 Hooks 之后） ----
+  if (!isAIChatOpen) return null
 
   // ---- 自动滚动到底部 ----
 
@@ -503,12 +519,12 @@ export default function AIAssistant() {
     const trimmed = apiKeyInput.trim()
     if (trimmed) {
       localStorage.setItem(STORAGE_KEY_API_KEY, trimmed)
-      setApiKeyState(trimmed)
+      setApiKey(trimmed)
       setApiKeySaved(true)
       setShowSettings(false)
     } else {
       localStorage.removeItem(STORAGE_KEY_API_KEY)
-      setApiKeyState('')
+      setApiKey('')
       setApiKeySaved(false)
     }
   }, [apiKeyInput])
