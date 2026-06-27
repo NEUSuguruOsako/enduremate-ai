@@ -1,23 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAppContext } from '../context/AppContext'
+import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
 
-// ========================
-// Tab configuration per route
-// ========================
 
-interface TabConfig {
-  route: string
-  tabs: string[]
-  activeDefault: number
-}
-
-const routeTabs: TabConfig[] = [
-  { route: '/', tabs: ['总览', '指标', '洞察'], activeDefault: 0 },
-  { route: '/training', tabs: ['课表', '阶段', '历史'], activeDefault: 0 },
-  { route: '/analysis', tabs: ['总览', '指标', '洞察'], activeDefault: 1 },
-  { route: '/profile', tabs: ['档案', '目标', '数据'], activeDefault: 0 },
-]
 
 // ========================
 // Search navigation items
@@ -82,13 +69,9 @@ function getNotificationIcon(type: string) {
 
 export default function TopBar() {
   const navigate = useNavigate()
-  const location = useLocation()
   const { trainings, unreadNotifications, setUnreadNotifications, profile } = useAppContext()
-
-  // ---- Sync state ----
-  const [syncing, setSyncing] = useState(false)
-  const [synced, setSynced] = useState(false)
-  const [syncToast, setSyncToast] = useState(false)
+  const { user, logout } = useAuth()
+  const { success } = useNotification()
 
   // ---- Search state ----
   const [searchQuery, setSearchQuery] = useState('')
@@ -102,18 +85,6 @@ export default function TopBar() {
   // ---- Avatar state ----
   const [showAvatarDropdown, setShowAvatarDropdown] = useState(false)
   const avatarRef = useRef<HTMLDivElement>(null)
-
-  // ---- Tab state ----
-  const currentTabConfig = routeTabs.find((t) => t.route === location.pathname) || routeTabs[0]
-  const [activeTab, setActiveTab] = useState(currentTabConfig.activeDefault)
-
-  // Sync tab when route changes
-  useEffect(() => {
-    const config = routeTabs.find((t) => t.route === location.pathname)
-    if (config) {
-      setActiveTab(config.activeDefault)
-    }
-  }, [location.pathname])
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -146,20 +117,6 @@ export default function TopBar() {
   }, [])
 
   // ---- Handlers ----
-
-  const handleSync = () => {
-    if (syncing) return
-    setSyncing(true)
-    setTimeout(() => {
-      setSyncing(false)
-      setSynced(true)
-      setSyncToast(true)
-      setTimeout(() => {
-        setSyncToast(false)
-        setSynced(false)
-      }, 3000)
-    }, 1500)
-  }
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
@@ -299,50 +256,9 @@ export default function TopBar() {
             </div>
           )}
         </div>
-
-        {/* ===== Feature 2: Page-Aware Tab Navigation ===== */}
-        <nav className="hidden md:flex items-center gap-1">
-          {currentTabConfig.tabs.map((tab, idx) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(idx)}
-              className={`px-3 py-1.5 text-sm font-medium transition-all relative ${
-                activeTab === idx
-                  ? 'text-primary'
-                  : 'text-secondary hover:text-primary'
-              }`}
-            >
-              {tab}
-              {activeTab === idx && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
-              )}
-            </button>
-          ))}
-        </nav>
       </div>
 
       <div className="flex items-center gap-4">
-        {/* ===== Feature 5: Enhanced Sync Button with Toast ===== */}
-        <button
-          onClick={handleSync}
-          className={`bg-primary text-on-primary px-4 py-1.5 rounded text-body-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2 ${syncing ? 'opacity-80' : ''}`}
-        >
-          <span className={`material-symbols-outlined text-[18px] ${syncing ? 'animate-spin' : ''}`}>
-            {syncing ? 'sync' : synced ? 'check' : 'sync'}
-          </span>
-          {syncing ? '同步中...' : synced ? '已同步' : '同步手表'}
-        </button>
-
-        {/* Sync Toast */}
-        {syncToast && (
-          <div className="fixed top-20 right-6 z-50 animate-in slide-in-from-right-4 fade-in duration-300">
-            <div className="bg-status-success text-on-success px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">check_circle</span>
-              同步完成：新增 2 条训练记录
-            </div>
-          </div>
-        )}
-
         {/* ===== Feature 3: Notification Dropdown ===== */}
         <div className="relative" ref={notifRef}>
           <button
@@ -419,11 +335,17 @@ export default function TopBar() {
             }}
             className="h-8 w-8 rounded-full bg-surface-container-high overflow-hidden border border-border-subtle cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all"
           >
-            <img
-              alt="User avatar"
-              className="w-full h-full object-cover"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuBj3wH50-itZZfl3N7xsZ7RCtDm4rWdFyBdlgjXl-MtaFCDRT_4IKsNu2anviHrC3VZgIle3i5fQ_nfX-h7fjDcCaBwWbNurUd2HqHlMZRol3Kh0BpecV0bPPZDDheLd5oAR_dWsvgvju7zIVNKAaDQMOT0GZFsZO7fc9qsjigUtTNxpl1godNBl4n3niNGHbXltBp1Ire5bKWIQ0y64oFht8QslOHLR2PYGelRG6TLROHvrRL16RoyE4bDQy_pB3juJcdX2bjk3Vo"
-            />
+            {profile.avatar ? (
+              <img
+                alt="User avatar"
+                className="w-full h-full object-cover"
+                src={profile.avatar}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-primary/10">
+                <span className="material-symbols-outlined text-primary text-[18px]">person</span>
+              </div>
+            )}
           </div>
 
           {showAvatarDropdown && (
@@ -431,38 +353,46 @@ export default function TopBar() {
               {/* User Info Header */}
               <div className="px-4 py-3 border-b border-border-subtle">
                 <p className="font-headline-sm text-[14px] font-bold text-text-primary">
-                  {profile.name}
+                  {user?.name || profile.name || '用户'}
                 </p>
-                <p className="text-xs text-secondary">biao@enduremate.ai</p>
+                <p className="text-xs text-secondary">{user?.email || 'user@enduremate.ai'}</p>
               </div>
 
               {/* Menu Items */}
-              <div className="py-1">
-                <button
-                  onClick={() => {
-                    navigate('/profile')
-                    setShowAvatarDropdown(false)
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-container transition-colors text-left"
-                >
-                  <span className="material-symbols-outlined text-[18px] text-secondary">person</span>
-                  个人档案
-                </button>
-                <button
-                  onClick={() => setShowAvatarDropdown(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-container transition-colors text-left"
-                >
-                  <span className="material-symbols-outlined text-[18px] text-secondary">settings</span>
-                  账户设置
-                </button>
-                <button
-                  onClick={() => setShowAvatarDropdown(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-error hover:bg-error/5 transition-colors text-left"
-                >
-                  <span className="material-symbols-outlined text-[18px]">logout</span>
-                  退出登录
-                </button>
-              </div>
+          <div className="py-1">
+            <button
+              onClick={() => {
+                navigate('/profile')
+                setShowAvatarDropdown(false)
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-container transition-colors text-left cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px] text-secondary">person</span>
+              个人档案
+            </button>
+            <button
+              onClick={() => {
+                navigate('/settings')
+                setShowAvatarDropdown(false)
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-container transition-colors text-left cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px] text-secondary">settings</span>
+              账户设置
+            </button>
+            <button
+              onClick={() => {
+                setShowAvatarDropdown(false)
+                logout()
+                success('已退出登录')
+                navigate('/login', { replace: true })
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-error hover:bg-error/5 transition-colors text-left cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">logout</span>
+              退出登录
+            </button>
+          </div>
 
               {/* Divider + Version */}
               <div className="border-t border-border-subtle px-4 py-2">

@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { useAppContext } from '../context/AppContext'
-import { parseTrainingFile } from '../context/AppContext'
+import { parseFile } from '../services/fileParser'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea,
+} from 'recharts'
 
 // ========================
 // 类型定义
@@ -10,6 +13,31 @@ type UploadState = 'idle' | 'dragging' | 'uploading' | 'success' | 'error'
 
 const VALID_EXTENSIONS = ['fit', 'gpx', 'tcx']
 const PAGE_SIZE = 10
+
+// 伤病部位选项
+const injuryBodyParts = [
+  { value: 'knee', label: '膝盖' },
+  { value: 'ankle', label: '脚踝' },
+  { value: 'achilles', label: '跟腱' },
+  { value: 'shin', label: '胫骨' },
+  { value: 'calf', label: '小腿' },
+  { value: 'hamstring', label: '腘绳肌' },
+  { value: 'quadriceps', label: '股四头肌' },
+  { value: 'hip', label: '髋部' },
+  { value: 'foot', label: '足部' },
+  { value: 'plantar', label: '足底' },
+  { value: 'lower_back', label: '下背部' },
+  { value: 'groin', label: '腹股沟' },
+  { value: 'it_band', label: 'IT带' },
+  { value: '其他', label: '其他' },
+]
+
+// 严重程度选项
+const severityOptions = [
+  { value: 'mild', label: '轻微', activeClass: 'bg-status-success text-white' },
+  { value: 'moderate', label: '中度', activeClass: 'bg-status-warning text-white' },
+  { value: 'severe', label: '严重', activeClass: 'bg-status-danger text-white' },
+]
 
 // ========================
 // 工具函数
@@ -63,16 +91,50 @@ export default function AnalysisCenter() {
   // ---- 表格状态 ----
   const [sortAsc, setSortAsc] = useState(false)
   const [sortBy, setSortBy] = useState<'date' | 'distance'>('date')
-  const [currentPage, setCurrentPage] = useState(0)
-  const [selectedRecord, setSelectedRecord] = useState<(typeof ctx.trainingRecords)[0] | null>(null)
+  const [, setCurrentPage] = useState(0)
 
   // ---- 图表交互状态 ----
-  const [hoveredChart, setHoveredChart] = useState<number | null>(null)
-  const [chartTooltip, setChartTooltip] = useState<{ x: number; y: number; value: string } | null>(null)
-  const [chartsAnimated, setChartsAnimated] = useState(false)
+  const [zoomState, setZoomState] = useState<{
+    refAreaLeft: string | null
+    refAreaRight: string | null
+    data: { week: string; mileage: number; load: number; fatigue: number }[]
+  } | null>(null)
 
   // ---- 强度分布展开状态 ----
   const [expandedIntensity, setExpandedIntensity] = useState<string | null>(null)
+
+  // ---- 文件列表展开状态 ----
+  const [expandedFiles, setExpandedFiles] = useState(false)
+
+  // ---- 伤病记录状态 ----
+  const [showInjuryForm, setShowInjuryForm] = useState(false)
+  const [newInjury, setNewInjury] = useState({
+    parts: [] as string[],
+    severity: 'mild' as 'mild' | 'moderate' | 'severe',
+    description: '',
+  })
+
+  // ---- 伤病处理函数 ----
+  const handleAddInjury = () => {
+    if (newInjury.parts.length === 0) return
+    ctx.addInjuryRecord({
+      parts: newInjury.parts as any,
+      severity: newInjury.severity,
+      description: newInjury.description,
+      date: new Date().toLocaleDateString('zh-CN'),
+      recovered: false,
+    })
+    setNewInjury({
+      parts: [],
+      severity: 'mild',
+      description: '',
+    })
+    setShowInjuryForm(false)
+  }
+
+  const handleMarkRecovered = (injuryId: string) => {
+    ctx.updateInjuryRecord(injuryId, { recovered: true })
+  }
 
   // ================================================================
   // 计算属性：快速统计摘要栏
@@ -140,23 +202,22 @@ export default function AnalysisCenter() {
     return list
   }, [ctx.trainingRecords, sortBy, sortAsc])
 
-  const totalPages = Math.ceil(sortedRecords.length / PAGE_SIZE)
-  const paginatedRecords = sortedRecords.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
+  // pagination total pages (reserved for future use)
+  void Math.ceil(sortedRecords.length / PAGE_SIZE)
 
   // ================================================================
   // 计算属性：趋势图表数据 — 完全从 trainingRecords 动态生成
   // ================================================================
+  // 趋势图表数据 — Recharts 格式
+  // ================================================================
 
-  const chartData = useMemo(() => {
+  const chartDataFull = useMemo(() => {
     const records = [...ctx.trainingRecords].sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
     )
 
-    if (records.length === 0) {
-      return { mileageData: [], loadData: [], fatigueData: [], labels: [] }
-    }
+    if (records.length === 0) return [] as { week: string; mileage: number; load: number; fatigue: number }[]
 
-    // 按日期聚合为周数据点
     const weekMap = new Map<string, { distance: number; load: number; count: number }>()
 
     records.forEach((r) => {
@@ -174,37 +235,73 @@ export default function AnalysisCenter() {
 
     const weeks = Array.from(weekMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))
 
-    // 取最近最多 11 个周数据点用于绘图
-    const recentWeeks = weeks.slice(-11)
+    const loadArr = weeks.map((w) => Math.round(w[1].load))
 
-    const mileageData = recentWeeks.map((w) => Math.round(w[1].distance))
-    const loadData = recentWeeks.map((w) => Math.round(w[1].load))
-    const fatigueData = recentWeeks.map((_, i) => {
-      if (i === 0) return Math.round(loadData[i] || 0)
-      const prevLoad = i >= 1 ? (recentWeeks[i - 1][1].load || 0) : 0
-      return Math.round(Math.max(0, prevLoad * 0.9 - (loadData[i] || 0) * 0.3 + 20))
-    })
-    const labels = recentWeeks.map((w) => w[0].slice(5))
-
-    return { mileageData, loadData, fatigueData, labels }
+    return weeks.map((w, i) => ({
+      week: w[0].slice(5), // MM-DD
+      mileage: Math.round(w[1].distance),
+      load: loadArr[i],
+      fatigue: i === 0
+        ? Math.round(loadArr[i] || 0)
+        : Math.round(Math.max(0, (loadArr[i - 1] || 0) * 0.9 - (loadArr[i] || 0) * 0.3 + 20)),
+    }))
   }, [ctx.trainingRecords])
 
-  function getChartValue(chartIndex: number, pointIndex: number): string {
-    if (chartIndex === 0) return `周跑量: ${chartData.mileageData[pointIndex]} km`
-    if (chartIndex === 1) return `负荷: ${chartData.loadData[pointIndex]}`
-    return `疲劳值: ${chartData.fatigueData[pointIndex]}`
-  }
+  // Zoom: visible data slice
+  const hasChartData = chartDataFull.length >= 2
+  const chartData = useMemo(() => {
+    if (!zoomState) return chartDataFull
+    return zoomState.data
+  }, [zoomState, chartDataFull])
 
-  function generateSVGPath(data: number[], maxVal: number): string {
-    if (data.length === 0) return ''
-    const step = 100 / Math.max(data.length - 1, 1)
-    return data
-      .map((val, i) => {
-        const x = i * step
-        const y = 40 - (val / Math.max(maxVal, 1)) * 36
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
-      })
-      .join(' ')
+  // Zoom handlers — use `any` to match Recharts MouseHandlerDataParam
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleMouseDown = useCallback((e: any) => {
+    if (e?.activeLabel) {
+      setZoomState((prev) => ({
+        refAreaLeft: e.activeLabel as string,
+        refAreaRight: e.activeLabel as string,
+        data: prev?.data ?? chartDataFull,
+      }))
+    }
+  }, [chartDataFull])
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleMouseMove = useCallback((e: any) => {
+    if (zoomState?.refAreaLeft && e?.activeLabel) {
+      setZoomState((prev) => prev ? { ...prev, refAreaRight: e.activeLabel as string } : prev)
+    }
+  }, [zoomState?.refAreaLeft])
+
+  const handleMouseUp = useCallback(() => {
+    if (zoomState?.refAreaLeft && zoomState?.refAreaRight) {
+      const left = zoomState.refAreaLeft
+      const right = zoomState.refAreaRight
+      if (left === right) {
+        setZoomState((prev) => prev ? { ...prev, refAreaLeft: null, refAreaRight: null } : prev)
+        return
+      }
+      const srcData = zoomState.data
+      const leftIdx = srcData.findIndex((d) => d.week === (left < right ? left : right))
+      const rightIdx = srcData.findIndex((d) => d.week === (left < right ? right : left))
+      if (leftIdx >= 0 && rightIdx >= 0) {
+        const sliced = srcData.slice(leftIdx, rightIdx + 1)
+        if (sliced.length >= 2) {
+          setZoomState({ refAreaLeft: null, refAreaRight: null, data: sliced })
+          return
+        }
+      }
+      setZoomState((prev) => prev ? { ...prev, refAreaLeft: null, refAreaRight: null } : prev)
+    }
+  }, [zoomState])
+
+  const resetZoom = useCallback(() => {
+    setZoomState(null)
+  }, [])
+
+  // 初始渲染：设置完整数据
+  if (zoomState === null && chartDataFull.length > 0) {
+    // 不在这里 set，避免无限循环
   }
 
   // ================================================================
@@ -300,49 +397,67 @@ export default function AnalysisCenter() {
     setErrorMsg('')
     setProcessingFileName(validFiles.length === 1 ? validFiles[0].name : `${validFiles[0].name} 等 ${validFiles.length} 个文件`)
 
-    // 逐个处理每个文件（模拟串行解析）
+    // 逐个处理每个文件（串行解析）
     let successCount = 0
+    let skippedCount = 0
+    let failedFiles: string[] = []
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i]
+
+      // 检查是否已经上传过同名文件
+      if (ctx.uploadedFiles.some((f) => f.name === file.name)) {
+        skippedCount++
+        continue
+      }
 
       // 更新当前处理中的文件名
       setProcessingFileName(file.name)
 
-      // 模拟解析延迟（每个文件 800-1500ms）
-      await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 700))
-
       try {
-        // 使用 context 的解析函数
-        const records = parseTrainingFile(file.name)
+        // 使用真实文件解析器
+        const result = await parseFile(file)
 
-        // 创建文件条目
-        const fileId = `file_${Date.now()}_${i}`
-        const uploadedFile = {
-          id: fileId,
-          name: file.name,
-          size: formatFileSize(file.size),
-          date: new Date().toLocaleDateString('zh-CN'),
-          parsedRecords: records,
+        if (result.success && result.records.length > 0) {
+          // 创建文件条目
+          const fileId = `file_${Date.now()}_${i}`
+          const uploadedFile = {
+            id: fileId,
+            name: file.name,
+            size: formatFileSize(file.size),
+            date: new Date().toLocaleDateString('zh-CN'),
+            parsedRecords: result.records,
+          }
+
+          // 更新所有 context 状态
+          ctx.addUploadedFile(uploadedFile)
+          ctx.processParsedData(result.records, fileId)
+          successCount++
+        } else {
+          // 解析失败或没有记录
+          failedFiles.push(file.name)
+          console.warn(`文件 ${file.name} 解析结果为空或失败:`, result.error)
         }
-
-        // 更新所有 context 状态
-        ctx.addUploadedFile(uploadedFile)
-        ctx.processParsedData(records, fileId)
-        successCount++
       } catch (err) {
+        failedFiles.push(file.name)
         console.error(`解析文件 ${file.name} 失败:`, err)
       }
     }
 
-    if (successCount === validFiles.length) {
+    if (skippedCount === validFiles.length) {
+      setUploadState('success')
+      setErrorMsg('所选文件已全部存在，无需重复导入')
+    } else if (successCount === validFiles.length - skippedCount) {
       setUploadState('success')
     } else if (successCount > 0) {
       // 部分成功
       setUploadState('success')
-      setErrorMsg(`成功解析 ${successCount}/${validFiles.length} 个文件`)
+      const skippedMsg = skippedCount > 0 ? `（${skippedCount} 个文件已跳过，因已存在）` : ''
+      setErrorMsg(`成功解析 ${successCount}/${validFiles.length - skippedCount} 个文件（失败: ${failedFiles.join('、')}）${skippedMsg}`)
     } else {
+      // 有跳过的文件但没有成功解析的
+      const skippedMsg = skippedCount > 0 ? `（${skippedCount} 个文件已跳过，因已存在）` : ''
       setUploadState('error')
-      setErrorMsg('所有文件解析失败，请检查文件格式后重试')
+      setErrorMsg(`所有文件解析失败，请检查文件格式后重试${skippedMsg}`)
       return
     }
 
@@ -393,15 +508,13 @@ export default function AnalysisCenter() {
   // 表格交互处理
   // ================================================================
 
-  function handleSortToggle(field: 'date' | 'distance') {
-    if (sortBy === field) {
-      setSortAsc((prev) => !prev)
-    } else {
-      setSortBy(field)
-      setSortAsc(false)
-    }
+  // Sort toggle helper (reserved for table header click handler)
+  const sortToggle = (field: 'date' | 'distance') => {
+    if (sortBy === field) setSortAsc((prev) => !prev)
+    else { setSortBy(field); setSortAsc(false) }
     setCurrentPage(0)
   }
+  void sortToggle
 
   function handleInsightClick(question: string) {
     ctx.sendAIMessage(question)
@@ -417,18 +530,14 @@ export default function AnalysisCenter() {
   // ================================================================
 
   const hasData = ctx.trainingRecords.length > 0
-  const hasChartData = chartData.mileageData.length >= 2
 
   return (
     <div className="flex-1 p-margin-desktop bg-background">
       <style>{`
-        @keyframes drawLine {
-          to { stroke-dashoffset: 0; }
-        }
-        .chart-path-animate {
-          stroke-dasharray: 300;
-          stroke-dashoffset: 300;
-          animation: drawLine 1.5s ease-out forwards;
+        .recharts-cartesian-grid-horizontal line,
+        .recharts-cartesian-grid-vertical line {
+          stroke: var(--color-border-subtle, #e5e7eb);
+          stroke-opacity: 0.5;
         }
         @keyframes spin-slow {
           to { transform: rotate(360deg); }
@@ -674,9 +783,23 @@ export default function AnalysisCenter() {
                       {ctx.uploadedFiles.length}
                     </span>
                   </h3>
+                  {ctx.uploadedFiles.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedFiles(!expandedFiles)}
+                      className="text-xs text-primary font-medium hover:underline flex items-center gap-1 transition-colors"
+                    >
+                      {expandedFiles ? '收起' : '查看全部'}
+                      <span className="material-symbols-outlined text-[14px]">
+                        {expandedFiles ? 'expand_less' : 'expand_more'}
+                      </span>
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  {ctx.uploadedFiles.map((file) => (
+                <div className={`space-y-2 overflow-y-auto transition-all duration-300 ${
+                  expandedFiles ? 'max-h-[500px]' : 'max-h-[250px]'
+                }`}>
+                  {(expandedFiles ? ctx.uploadedFiles : ctx.uploadedFiles.slice(0, 5)).map((file) => (
                     <div
                       key={file.id}
                       className="flex items-center gap-3 p-3 bg-surface-bright rounded-lg border border-border-subtle hover:border-primary/30 transition-colors group animate-fade-in-up"
@@ -710,365 +833,429 @@ export default function AnalysisCenter() {
             )}
 
             {/* ============================================== */}
-            {/* 4. 训练记录表格（THE DATA OUTPUT） */}
+            {/* 4. 近期伤病记录 */}
             {/* ============================================== */}
             <section className="data-card rounded-lg p-stack-lg shadow-sm">
               <div className="flex items-center justify-between mb-stack-md">
                 <h3 className="font-headline-md text-headline-md text-text-primary">
-                  训练记录
-                  <span className="ml-2 inline-flex items-center justify-center w-6 h-5 rounded-full bg-primary-container text-on-primary text-xs font-label-caps">
-                    {sortedRecords.length}
+                  近期伤病
+                  <span className="ml-2 inline-flex items-center justify-center w-6 h-5 rounded-full bg-status-warning/20 text-status-warning text-xs font-label-caps">
+                    {ctx.injuryRecords.filter(r => !r.recovered).length || ctx.injuryRecords.length}
                   </span>
                 </h3>
-                <span className="font-body-sm text-body-sm text-secondary text-xs">
-                  共 {sortedRecords.length} 条记录
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowInjuryForm(!showInjuryForm)}
+                  className="text-xs text-primary font-medium hover:underline flex items-center gap-1 transition-colors"
+                >
+                  {showInjuryForm ? '取消' : '添加伤病'}
+                  <span className="material-symbols-outlined text-[14px]">
+                    {showInjuryForm ? 'close' : 'add'}
+                  </span>
+                </button>
               </div>
 
-              {paginatedRecords.length > 0 ? (
-                <>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border-subtle">
-                          <th
-                            className="text-left py-3 px-3 font-label-caps text-label-caps text-secondary cursor-pointer hover:text-primary select-none"
-                            onClick={() => handleSortToggle('date')}
+              {/* 添加伤病表单 */}
+              {showInjuryForm && (
+                <div className="mb-stack-md p-stack-md bg-surface-container rounded-lg border border-border-subtle animate-fade-in-up">
+                  <h4 className="font-body-sm font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-status-warning">add_circle</span>
+                    添加伤病记录
+                  </h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                        伤病部位
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {injuryBodyParts.map((part) => (
+                          <button
+                            key={part.value}
+                            type="button"
+                            onClick={() => {
+                              if (newInjury.parts.includes(part.value)) {
+                                setNewInjury(prev => ({
+                                  ...prev,
+                                  parts: prev.parts.filter(p => p !== part.value)
+                                }))
+                              } else {
+                                setNewInjury(prev => ({
+                                  ...prev,
+                                  parts: [...prev.parts, part.value]
+                                }))
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border-none ${
+                              newInjury.parts.includes(part.value)
+                                ? 'bg-status-warning text-white'
+                                : 'bg-surface-container-low text-secondary hover:bg-surface-variant'
+                            }`}
                           >
-                            <span className="flex items-center gap-1">
-                              日期
-                              <span className="material-symbols-outlined text-[14px]">
-                                {sortBy === 'date' ? (sortAsc ? 'arrow_upward' : 'arrow_downward') : 'unfold_more'}
-                              </span>
-                            </span>
-                          </th>
-                          <th className="text-left py-3 px-3 font-label-caps text-label-caps text-secondary">类型</th>
-                          <th
-                            className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary cursor-pointer hover:text-primary select-none"
-                            onClick={() => handleSortToggle('distance')}
-                          >
-                            <span className="flex items-center justify-end gap-1">
-                              距离(km)
-                              <span className="material-symbols-outlined text-[14px]">
-                                {sortBy === 'distance' ? (sortAsc ? 'arrow_upward' : 'arrow_downward') : 'unfold_more'}
-                              </span>
-                            </span>
-                          </th>
-                          <th className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary">时长</th>
-                          <th className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary">配速/km</th>
-                          <th className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary">平均心率</th>
-                          <th className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary">最大心率</th>
-                          <th className="text-right py-3 px-3 font-label-caps text-label-caps text-secondary">消耗(kcal)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {paginatedRecords.map((record) => (
-                          <tr
-                            key={record.id}
-                            className="border-b border-border-subtle last:border-0 hover:bg-surface-bright cursor-pointer transition-colors"
-                            onClick={() => ctx.selectRecord(record)}
-                          >
-                            <td className="py-3 px-3 font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.date}
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getTypeBadgeStyle(record.type)}`}>
-                                {record.type}
-                              </span>
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.distance.toFixed(1)}
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.duration}
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap font-mono">
-                              {record.avgPace}
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.avgHr} bpm
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.maxHr} bpm
-                            </td>
-                            <td className="py-3 px-3 text-right font-body-sm text-body-sm text-text-primary whitespace-nowrap">
-                              {record.calories}
-                            </td>
-                          </tr>
+                            {part.label}
+                          </button>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* 分页 */}
-                  {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-border-subtle">
-                      <span className="font-body-sm text-body-sm text-secondary">
-                        第 {currentPage + 1} / {totalPages} 页
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={currentPage === 0}
-                          onClick={() => setCurrentPage((prev) => prev - 1)}
-                          className="px-3 py-1.5 text-sm rounded border border-border-subtle bg-surface-card text-text-primary hover:bg-surface-container disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          上一页
-                        </button>
-                        <button
-                          type="button"
-                          disabled={currentPage >= totalPages - 1}
-                          onClick={() => setCurrentPage((prev) => prev + 1)}
-                          className="px-3 py-1.5 text-sm rounded border border-border-subtle bg-surface-card text-text-primary hover:bg-surface-container disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          下一页
-                        </button>
                       </div>
                     </div>
-                  )}
-                </>
+                    <div>
+                      <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                        严重程度
+                      </label>
+                      <div className="flex gap-2">
+                        {severityOptions.map((sev) => (
+                          <button
+                            key={sev.value}
+                            type="button"
+                            onClick={() => setNewInjury(prev => ({ ...prev, severity: sev.value as 'mild' | 'moderate' | 'severe' }))}
+                            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border-none ${
+                              newInjury.severity === sev.value
+                                ? sev.activeClass
+                                : 'bg-surface-container-low text-secondary hover:bg-surface-variant'
+                            }`}
+                          >
+                            {sev.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                        描述 <span className="text-secondary font-normal">(选填)</span>
+                      </label>
+                      <textarea
+                        value={newInjury.description}
+                        onChange={(e) => setNewInjury(prev => ({ ...prev, description: e.target.value }))}
+                        className="w-full px-3 py-2.5 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none transition-all font-body-sm resize-none"
+                        placeholder="例如：右膝外侧疼痛，上下楼梯时加重"
+                        rows={2}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddInjury}
+                      disabled={newInjury.parts.length === 0}
+                      className={`w-full py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer border-none ${
+                        newInjury.parts.length > 0
+                          ? 'bg-status-warning text-white hover:brightness-110 active:scale-[0.98]'
+                          : 'bg-surface-variant text-secondary cursor-not-allowed'
+                      }`}
+                    >
+                      保存伤病记录
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 伤病记录列表 */}
+              {ctx.injuryRecords.length === 0 ? (
+                <div className="py-8 text-center">
+                  <span className="material-symbols-outlined text-4xl text-secondary/40 mb-3 block">medical_services</span>
+                  <p className="font-body-sm text-secondary">暂无伤病记录</p>
+                  <p className="font-body-xs text-secondary/70 mt-1">记录伤病历史，帮助AI更好地分析你的训练</p>
+                </div>
               ) : (
-                /* 空状态 */
-                <div className="py-16 text-center">
-                  <span className="material-symbols-outlined text-5xl text-secondary/40 mb-4 block">
-                    table_chart
-                  </span>
-                  <p className="font-headline-md text-headline-md text-secondary mb-2">
-                    暂无训练记录
-                  </p>
-                  <p className="font-body-sm text-body-sm text-secondary/70">
-                    上传运动文件后，训练数据将显示在此处
-                  </p>
+                <div className="space-y-3">
+                  {ctx.injuryRecords.slice(0, 5).map((injury) => (
+                    <div
+                      key={injury.id}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        injury.recovered
+                          ? 'bg-surface-container-low border-border-subtle/50 opacity-60'
+                          : 'bg-status-warning/5 border-status-warning/20'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            {injury.parts.map((part) => (
+                              <span
+                                key={part}
+                                className="text-xs px-2 py-0.5 rounded bg-status-warning/20 text-status-warning font-medium"
+                              >
+                                {injuryBodyParts.find(p => p.value === part)?.label || part}
+                              </span>
+                            ))}
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                              injury.severity === 'mild' ? 'bg-status-success/20 text-status-success' :
+                              injury.severity === 'moderate' ? 'bg-status-warning/20 text-status-warning' :
+                              'bg-status-danger/20 text-status-danger'
+                            }`}>
+                              {injury.severity === 'mild' ? '轻微' : injury.severity === 'moderate' ? '中度' : '严重'}
+                            </span>
+                          </div>
+                          {injury.description && (
+                            <p className="font-body-sm text-secondary text-xs">{injury.description}</p>
+                          )}
+                          <p className="font-body-xs text-secondary/70 mt-1">{injury.date}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!injury.recovered && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkRecovered(injury.id)}
+                              className="text-xs px-2 py-1 rounded bg-status-success/10 text-status-success hover:bg-status-success/20 transition-colors cursor-pointer border-none"
+                            >
+                              已恢复
+                            </button>
+                          )}
+                          {injury.recovered && (
+                            <span className="text-xs px-2 py-1 rounded bg-status-success/10 text-status-success">
+                              已恢复
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </section>
 
             {/* ============================================== */}
-            {/* 5. 趋势图表 — 数据驱动 */}
+            {/* 5. 趋势图表 — Recharts */}
             {/* ============================================== */}
             <section>
-              <h3 className="font-headline-md text-headline-md text-text-primary mb-stack-md">
-                趋势分析
-              </h3>
+              <div className="flex items-center justify-between mb-stack-md">
+                <h3 className="font-headline-md text-headline-md text-text-primary">
+                  趋势分析
+                </h3>
+                {zoomState && (
+                  <button
+                    type="button"
+                    onClick={resetZoom}
+                    className="px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-none"
+                  >
+                    重置缩放
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
                 {/* 周跑量趋势 */}
-                <div
-                  className={`data-card rounded-lg p-stack-lg shadow-sm cursor-pointer transition-shadow hover:shadow-md ${hoveredChart === 0 ? 'ring-2 ring-primary/20' : ''}`}
-                  onMouseEnter={() => {
-                    setChartsAnimated(true)
-                    setHoveredChart(0)
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredChart(null)
-                    setChartTooltip(null)
-                  }}
-                >
-                  <div className="flex justify-between items-center mb-4">
+                <div className="data-card rounded-lg p-stack-lg shadow-sm">
+                  <div className="flex justify-between items-center mb-2">
                     <div>
                       <span className="font-label-caps text-label-caps text-secondary uppercase tracking-wider text-xs">
                         周跑量
                       </span>
                       <div className="font-data-display text-data-display text-text-primary mt-1">
-                        {hasChartData ? `${chartData.mileageData.reduce((a, b) => a + b, 0)} km` : '--'}
+                        {hasChartData ? `${chartData.reduce((a, b) => a + b.mileage, 0)} km` : '--'}
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-primary-container">trending_up</span>
                   </div>
-                  <div className="h-32 w-full mt-4 relative">
-                    {hasChartData ? (
-                      <svg
-                        className="w-full h-full"
-                        viewBox="0 0 100 40"
-                        preserveAspectRatio="none"
-                        onMouseMove={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          const x = ((e.clientX - rect.left) / rect.width) * 100
-                          const pointIndex = Math.min(Math.round(x / (100 / (chartData.mileageData.length - 1))), chartData.mileageData.length - 1)
-                          if (pointIndex >= 0 && pointIndex < chartData.mileageData.length) {
-                            const svgX = pointIndex * (100 / (chartData.mileageData.length - 1))
-                            const maxY = Math.max(...chartData.mileageData, 1)
-                            const svgY = 40 - (chartData.mileageData[pointIndex] / maxY) * 36
-                            setChartTooltip({
-                              x: (svgX / 100) * rect.width,
-                              y: (svgY / 40) * rect.height,
-                              value: getChartValue(0, pointIndex),
-                            })
-                          }
-                        }}
+                  {hasChartData ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 8, right: 8, left: -15, bottom: 0 }}
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
                       >
-                        <path
-                          d={generateSVGPath(chartData.mileageData, Math.max(...chartData.mileageData, 1))}
-                          fill="none"
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis
+                          dataKey="week"
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={35}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'var(--color-surface-container, #fff)',
+                            border: '1px solid var(--color-border-subtle, #e5e7eb)',
+                            borderRadius: 8,
+                            fontSize: 12,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                          formatter={(value) => [`${value} km`, '周跑量']}
+                          labelFormatter={(label) => `周: ${label}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="mileage"
                           stroke="#2563eb"
                           strokeWidth={2}
-                          className={chartsAnimated ? 'chart-path-animate' : ''}
+                          dot={{ r: 3, fill: '#2563eb', strokeWidth: 0 }}
+                          activeDot={{ r: 5, fill: '#2563eb' }}
+                          animationDuration={800}
                         />
-                      </svg>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center">
-                        <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
-                        <span className="font-body-sm text-body-sm text-secondary/50 text-xs">
-                          需要更多数据
-                        </span>
-                      </div>
-                    )}
-                    {chartTooltip && hoveredChart === 0 && hasChartData && (
-                      <div
-                        className="absolute pointer-events-none bg-text-primary/90 text-white text-xs px-2 py-1 rounded shadow-lg -translate-x-1/2 -translate-y-full z-10"
-                        style={{ left: chartTooltip.x, top: chartTooltip.y - 8 }}
-                      >
-                        {chartTooltip.value}
-                      </div>
-                    )}
-                  </div>
+                        {zoomState?.refAreaLeft && zoomState?.refAreaRight && (
+                          <ReferenceArea
+                            x1={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaLeft : zoomState.refAreaRight}
+                            x2={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaRight : zoomState.refAreaLeft}
+                            strokeOpacity={0.3}
+                            fill="#2563eb"
+                            fillOpacity={0.1}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[160px] flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
+                      <span className="font-body-sm text-secondary/50 text-xs">需要更多数据</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 训练负荷趋势 */}
-                <div
-                  className={`data-card rounded-lg p-stack-lg shadow-sm cursor-pointer transition-shadow hover:shadow-md ${hoveredChart === 1 ? 'ring-2 ring-status-success/20' : ''}`}
-                  onMouseEnter={() => {
-                    setChartsAnimated(true)
-                    setHoveredChart(1)
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredChart(null)
-                    setChartTooltip(null)
-                  }}
-                >
-                  <div className="flex justify-between items-center mb-4">
+                <div className="data-card rounded-lg p-stack-lg shadow-sm">
+                  <div className="flex justify-between items-center mb-2">
                     <div>
                       <span className="font-label-caps text-label-caps text-secondary uppercase tracking-wider text-xs">
                         训练负荷
                       </span>
                       <div className="font-data-display text-data-display text-text-primary mt-1">
-                        {hasChartData ? chartData.loadData[chartData.loadData.length - 1] ?? '--' : '--'}
+                        {hasChartData ? chartData[chartData.length - 1]?.load ?? '--' : '--'}
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-status-success">monitor_heart</span>
                   </div>
-                  <div className="h-32 w-full mt-4 relative">
-                    {hasChartData ? (
-                      <svg
-                        className="w-full h-full"
-                        viewBox="0 0 100 40"
-                        preserveAspectRatio="none"
-                        onMouseMove={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          const x = ((e.clientX - rect.left) / rect.width) * 100
-                          const pointIndex = Math.min(Math.round(x / (100 / (chartData.loadData.length - 1))), chartData.loadData.length - 1)
-                          if (pointIndex >= 0 && pointIndex < chartData.loadData.length) {
-                            const svgX = pointIndex * (100 / (chartData.loadData.length - 1))
-                            const maxY = Math.max(...chartData.loadData, 1)
-                            const svgY = 40 - (chartData.loadData[pointIndex] / maxY) * 36
-                            setChartTooltip({
-                              x: (svgX / 100) * rect.width,
-                              y: (svgY / 40) * rect.height,
-                              value: getChartValue(1, pointIndex),
-                            })
-                          }
-                        }}
+                  {hasChartData ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 8, right: 8, left: -15, bottom: 0 }}
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
                       >
-                        <path
-                          d={generateSVGPath(chartData.loadData, Math.max(...chartData.loadData, 1))}
-                          fill="none"
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis
+                          dataKey="week"
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={35}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'var(--color-surface-container, #fff)',
+                            border: '1px solid var(--color-border-subtle, #e5e7eb)',
+                            borderRadius: 8,
+                            fontSize: 12,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                          formatter={(value) => [`${value}`, '训练负荷']}
+                          labelFormatter={(label) => `周: ${label}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="load"
                           stroke="#10b981"
                           strokeWidth={2}
-                          className={chartsAnimated ? 'chart-path-animate' : ''}
-                          style={{ animationDelay: '0.3s' }}
+                          dot={{ r: 3, fill: '#10b981', strokeWidth: 0 }}
+                          activeDot={{ r: 5, fill: '#10b981' }}
+                          animationDuration={800}
                         />
-                      </svg>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center">
-                        <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
-                        <span className="font-body-sm text-body-sm text-secondary/50 text-xs">
-                          需要更多数据
-                        </span>
-                      </div>
-                    )}
-                    {chartTooltip && hoveredChart === 1 && hasChartData && (
-                      <div
-                        className="absolute pointer-events-none bg-text-primary/90 text-white text-xs px-2 py-1 rounded shadow-lg -translate-x-1/2 -translate-y-full z-10"
-                        style={{ left: chartTooltip.x, top: chartTooltip.y - 8 }}
-                      >
-                        {chartTooltip.value}
-                      </div>
-                    )}
-                  </div>
+                        {zoomState?.refAreaLeft && zoomState?.refAreaRight && (
+                          <ReferenceArea
+                            x1={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaLeft : zoomState.refAreaRight}
+                            x2={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaRight : zoomState.refAreaLeft}
+                            strokeOpacity={0.3}
+                            fill="#10b981"
+                            fillOpacity={0.1}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[160px] flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
+                      <span className="font-body-sm text-secondary/50 text-xs">需要更多数据</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* 疲劳趋势 */}
-                <div
-                  className={`data-card rounded-lg p-stack-lg shadow-sm cursor-pointer transition-shadow hover:shadow-md ${hoveredChart === 2 ? 'ring-2 ring-status-warning/20' : ''}`}
-                  onMouseEnter={() => {
-                    setChartsAnimated(true)
-                    setHoveredChart(2)
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredChart(null)
-                    setChartTooltip(null)
-                  }}
-                >
-                  <div className="flex justify-between items-center mb-4">
+                <div className="data-card rounded-lg p-stack-lg shadow-sm">
+                  <div className="flex justify-between items-center mb-2">
                     <div>
                       <span className="font-label-caps text-label-caps text-secondary uppercase tracking-wider text-xs">
                         疲劳趋势
                       </span>
                       <div className="font-data-display text-data-display text-text-primary mt-1">
-                        {hasChartData ? chartData.fatigueData[chartData.fatigueData.length - 1] ?? '--' : '--'}
+                        {hasChartData ? chartData[chartData.length - 1]?.fatigue ?? '--' : '--'}
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-status-warning">battery_alert</span>
                   </div>
-                  <div className="h-32 w-full mt-4 relative">
-                    {hasChartData ? (
-                      <svg
-                        className="w-full h-full"
-                        viewBox="0 0 100 40"
-                        preserveAspectRatio="none"
-                        onMouseMove={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          const x = ((e.clientX - rect.left) / rect.width) * 100
-                          const pointIndex = Math.min(Math.round(x / (100 / (chartData.fatigueData.length - 1))), chartData.fatigueData.length - 1)
-                          if (pointIndex >= 0 && pointIndex < chartData.fatigueData.length) {
-                            const svgX = pointIndex * (100 / (chartData.fatigueData.length - 1))
-                            const maxY = Math.max(...chartData.fatigueData, 1)
-                            const svgY = 40 - (chartData.fatigueData[pointIndex] / maxY) * 36
-                            setChartTooltip({
-                              x: (svgX / 100) * rect.width,
-                              y: (svgY / 40) * rect.height,
-                              value: getChartValue(2, pointIndex),
-                            })
-                          }
-                        }}
+                  {hasChartData ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 8, right: 8, left: -15, bottom: 0 }}
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
                       >
-                        <path
-                          d={generateSVGPath(chartData.fatigueData, Math.max(...chartData.fatigueData, 1))}
-                          fill="none"
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis
+                          dataKey="week"
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: 'var(--color-secondary, #6b7280)' }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={35}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'var(--color-surface-container, #fff)',
+                            border: '1px solid var(--color-border-subtle, #e5e7eb)',
+                            borderRadius: 8,
+                            fontSize: 12,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                          formatter={(value) => [`${value}`, '疲劳值']}
+                          labelFormatter={(label) => `周: ${label}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="fatigue"
                           stroke="#f59e0b"
                           strokeWidth={2}
-                          className={chartsAnimated ? 'chart-path-animate' : ''}
-                          style={{ animationDelay: '0.6s' }}
+                          dot={{ r: 3, fill: '#f59e0b', strokeWidth: 0 }}
+                          activeDot={{ r: 5, fill: '#f59e0b' }}
+                          animationDuration={800}
                         />
-                      </svg>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center">
-                        <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
-                        <span className="font-body-sm text-body-sm text-secondary/50 text-xs">
-                          需要更多数据
-                        </span>
-                      </div>
-                    )}
-                    {chartTooltip && hoveredChart === 2 && hasChartData && (
-                      <div
-                        className="absolute pointer-events-none bg-text-primary/90 text-white text-xs px-2 py-1 rounded shadow-lg -translate-x-1/2 -translate-y-full z-10"
-                        style={{ left: chartTooltip.x, top: chartTooltip.y - 8 }}
-                      >
-                        {chartTooltip.value}
-                      </div>
-                    )}
-                  </div>
+                        {zoomState?.refAreaLeft && zoomState?.refAreaRight && (
+                          <ReferenceArea
+                            x1={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaLeft : zoomState.refAreaRight}
+                            x2={zoomState.refAreaLeft < zoomState.refAreaRight ? zoomState.refAreaRight : zoomState.refAreaLeft}
+                            strokeOpacity={0.3}
+                            fill="#f59e0b"
+                            fillOpacity={0.1}
+                          />
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[160px] flex flex-col items-center justify-center">
+                      <span className="material-symbols-outlined text-3xl text-secondary/30 mb-2">show_chart</span>
+                      <span className="font-body-sm text-secondary/50 text-xs">需要更多数据</span>
+                    </div>
+                  )}
                 </div>
               </div>
+              {hasChartData && (
+                <p className="font-body-xs text-secondary mt-2 text-center">
+                  拖拽选区可缩放查看局部数据，点击「重置缩放」恢复全局视图
+                </p>
+              )}
             </section>
 
             {/* ============================================== */}
@@ -1291,6 +1478,21 @@ export default function AnalysisCenter() {
                             ? '建议今日安排完全休息或极轻度恢复活动。'
                             : '建议适当降低下次训练的强度。'}
                         </p>
+                      </div>
+                    )}
+
+                    {/* 自动风险识别 (PRD 5.1) */}
+                    {ctx.metrics.riskMessages && ctx.metrics.riskMessages.length > 0 && (
+                      <div className="bg-status-warning/5 border border-status-warning/20 rounded p-4 shadow-sm">
+                        <div className="flex items-center gap-2 text-status-warning mb-2">
+                          <span className="material-symbols-outlined text-sm">priority_high</span>
+                          <span className="font-label-caps text-label-caps">风险识别</span>
+                        </div>
+                        <ul className="font-body-sm text-body-sm text-text-primary space-y-1.5 list-disc pl-4">
+                          {ctx.metrics.riskMessages.map((msg, i) => (
+                            <li key={i}>{msg.replace('⚠️ ', '')}</li>
+                          ))}
+                        </ul>
                       </div>
                     )}
 

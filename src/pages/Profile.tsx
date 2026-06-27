@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAppContext } from '../context/AppContext'
+import OnboardingGuide from '../components/OnboardingGuide'
 
 const goalOptions = [
   '5K进阶',
@@ -10,98 +11,287 @@ const goalOptions = [
   '赛后恢复',
 ]
 
-// Generic training zones (reference values before personalization)
-const genericZones = [
-  {
-    zone: 'ZONE 1',
-    label: '恢复',
-    hr: '110-130',
-    pace: '6:00 - 6:30 /km',
-    accentColor: undefined,
-    description: '恢复区，用于热身和冷身，促进血液循环和乳酸清除',
-    weeklyPercent: '15-20%',
-    examples: ['轻松跑', '冷身慢跑', '恢复性有氧'],
-  },
-  {
-    zone: 'ZONE 2',
-    label: '有氧',
-    hr: '131-145',
-    pace: '5:20 - 5:50 /km',
-    accentColor: undefined,
-    description: '有氧基础区，建立耐力引擎的核心区间',
-    weeklyPercent: '45-55%',
-    examples: ['长距离慢跑(LSD)', '轻松跑', '基础有氧跑'],
-  },
-  {
-    zone: 'ZONE 3',
-    label: '节奏',
-    hr: '146-160',
-    pace: '4:40 - 5:10 /km',
-    accentColor: 'border-l-status-warning' as const,
-    description: '节奏跑区间，提升乳酸耐受和比赛配速感',
-    weeklyPercent: '10-15%',
-    examples: ['节奏跑(Tempo)', '马拉松配速跑', '巡航间歇'],
-  },
-  {
-    zone: 'ZONE 4',
-    label: '乳酸阈',
-    hr: '161-175',
-    pace: '4:10 - 4:30 /km',
-    accentColor: 'border-l-tertiary-container' as const,
-    description: '乳酸阈值区间，提高身体清除乳酸的能力',
-    weeklyPercent: '5-10%',
-    examples: ['阈值跑(CRIT)', '亚阈值间歇', ' hill repeats'],
-  },
-  {
-    zone: 'ZONE 5',
-    label: '最大摄氧',
-    hr: '176+',
-    pace: '< 4:00 /km',
-    accentColor: 'border-l-status-danger' as const,
-    description: '最大摄氧量区间，提升 VO2max 和神经肌肉效率',
-    weeklyPercent: '3-5%',
-    examples: ['VO2max 间歇', '速度训练', '冲刺跑'],
-  },
-]
-
-// PB table distances
-const pbDistances = [
-  { key: '5K', label: '5K' },
-  { key: '10K', label: '10K' },
-  { key: 'halfMarathon', label: '半马' },
-  { key: 'fullMarathon', label: '全马' },
-]
-
-// VDOT calculation (Jack Daniels approximation)
-function calculateVDOT(distanceKm: number, timeMinutes: number): number {
-  const vdot = Math.round((0.8 + 13.8 / (timeMinutes / distanceKm) + 2.92 / distanceKm + 0.03 * distanceKm) * 10) / 10
-  return Math.max(30, Math.min(85, vdot))
+function formatPace(secondsPerKm: number): string {
+  const mins = Math.floor(secondsPerKm / 60)
+  const secs = Math.round(secondsPerKm % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// Derive target pace from goal string
-function deriveTargetPace(goal: string): string {
-  if (!goal) return '\u2014'
-  if (goal.includes('\u5168\u9a6c')) return '~4:15/km'
-  if (goal.includes('\u534a\u9a6c')) return '~4:45/km'
-  if (goal.includes('10K')) return '~4:30/km'
-  if (goal.includes('5K')) return '~4:00/km'
+/**
+ * 根据 VDOT 和训练强度百分比推算配速（秒/公里）
+ * 采用 Jack Daniels VDOT 表插值 + 强度系数
+ * 
+ * 强度百分比对应关系（基于 vVO2max = 最大摄氧速度）：
+ *  100% = VO2max 配速（5km 比赛配速）
+ *   92% = 10km 比赛配速
+ *   85% = 半马配速
+ *   83% = 全马配速
+ *   79% = 阈值跑上限
+ *   75% = 阈值跑下限
+ */
+function getVDOTPace(vdot: number, percentage: number): number {
+  // 以 5km 比赛配速作为 100% 基准（直接从 VDOT 表查）
+  // 先查最近的 VDOT 表行
+  let pace5k = 212 // VDOT 50 对应的 5km 配速（秒/公里）
+  
+  for (let i = 0; i < vdotTable.length; i++) {
+    if (vdotTable[i].vdot === Math.round(vdot)) {
+      pace5k = vdotTable[i].pace5k
+      break
+    }
+    // 线性插值
+    if (i < vdotTable.length - 1) {
+      const curr = vdotTable[i]
+      const next = vdotTable[i + 1]
+      if (vdot >= curr.vdot && vdot <= next.vdot) {
+        const t = (vdot - curr.vdot) / (next.vdot - curr.vdot)
+        pace5k = Math.round(curr.pace5k + (next.pace5k - curr.pace5k) * t)
+        break
+      }
+    }
+  }
+  
+  // 根据百分比计算目标配速
+  // percentage 越高 = 跑得越快 = 配速数值越小
+  return Math.round(pace5k * (100 / percentage))
+}
+
+function calculateTrainingZones(age: number | null, vdot: number | null, restingHr: number | null) {
+  // 使用 Tanaka 公式：HRmax = 208 - 0.7 × age（比经典 220-age 更准确）
+  const maxHR = age ? Math.round(208 - 0.7 * age) : 185
+  // 静息心率：优先使用用户填写值，默认55
+  const restingHR = restingHr && restingHr > 35 ? restingHr : 55
+  // 心率储备 = 最大心率 - 静息心率
+  const hrr = maxHR - restingHR
+
+  type ZoneDef = {
+    zone: string
+    label: string
+    hrrMin: number
+    hrrMax: number
+    pacePercent: [number, number]
+    accentColor: string | undefined
+    description: string
+    weeklyPercent: string
+    examples: string[]
+  }
+  
+  const zones: ZoneDef[] = [
+    {
+      zone: 'ZONE 1',
+      label: '恢复',
+      hrrMin: 0.50,
+      hrrMax: 0.60,
+      pacePercent: [59, 65],   // ~59-65% vVO2max
+      accentColor: undefined,
+      description: '恢复区，用于热身和冷身，促进血液循环和乳酸清除',
+      weeklyPercent: '10-15%',
+      examples: ['轻松跑', '冷身慢跑', '恢复性有氧'],
+    },
+    {
+      zone: 'ZONE 2',
+      label: '有氧基础',
+      hrrMin: 0.60,
+      hrrMax: 0.74,
+      pacePercent: [65, 74],   // ~65-74% vVO2max（Daniels E区间）
+      accentColor: undefined,
+      description: '有氧基础区，建立耐力引擎的核心区间，燃脂效率最高',
+      weeklyPercent: '70-80%',
+      examples: ['长距离慢跑(LSD)', '轻松跑', '基础有氧跑'],
+    },
+    {
+      zone: 'ZONE 3',
+      label: '马拉松配速',
+      hrrMin: 0.75,
+      hrrMax: 0.84,
+      pacePercent: [75, 84],   // 马拉松配速区间（Daniels M区间）
+      accentColor: 'border-l-status-warning',
+      description: '马拉松配速区间，适应比赛节奏，提高脂肪利用率',
+      weeklyPercent: '0-10%',
+      examples: ['马拉松配速跑', '巡航间歇', '节奏跑入门'],
+    },
+    {
+      zone: 'ZONE 4',
+      label: '乳酸阈',
+      hrrMin: 0.85,
+      hrrMax: 0.88,
+      pacePercent: [83, 88] as [number, number],   // 乳酸阈值区间（Daniels T区间）
+      accentColor: 'border-l-tertiary-container',
+      description: '乳酸阈值区间，提高身体清除乳酸的能力，是提速关键',
+      weeklyPercent: '5-10%',
+      examples: ['阈值跑(CRIT)', '亚阈值间歇', '马拉松配速+'],
+    },
+    {
+      zone: 'ZONE 5',
+      label: '最大摄氧',
+      hrrMin: 0.95,
+      hrrMax: 1.00,
+      pacePercent: [95, 100] as [number, number],  // VO2max 区间（Daniels I区间）
+      accentColor: 'border-l-status-danger',
+      description: '最大摄氧量区间，提升 VO2max 和神经肌肉效率',
+      weeklyPercent: '5-10%',
+      examples: ['VO2max 间歇', '速度训练', '冲刺跑'],
+    },
+  ]
+
+  return zones.map((z) => {
+    // Karvonen 公式：目标HR = 静息HR + HRR × 强度百分比
+    const hrMin = Math.round(restingHR + hrr * z.hrrMin)
+    const hrMax = z.hrrMax === 1.00
+      ? `${Math.round(restingHR + hrr * z.hrrMax)}+`
+      : `${Math.round(restingHR + hrr * z.hrrMax)}`
+    
+    let paceStr = '- /km'
+    if (vdot) {
+      // 配速 percentage 越高 = 跑得越快，所以上限用更高百分比
+      const paceSlowSec = getVDOTPace(vdot, z.pacePercent[0])
+      const paceFastSec = getVDOTPace(vdot, z.pacePercent[1])
+      paceStr = `${formatPace(paceSlowSec)} - ${formatPace(paceFastSec)} /km`
+    }
+    
+    return {
+      ...z,
+      hr: z.hrrMax === 1.00 ? `${hrMin}+` : `${hrMin}-${hrMax}`,
+      pace: paceStr,
+    }
+  })
+}
+
+// PB table distances with distance values
+const pbDistances = [
+  { key: '5K', label: '5K', distance: 5 },
+  { key: '10K', label: '10K', distance: 10 },
+  { key: 'halfMarathon', label: '半马', distance: 21.0975 },
+  { key: 'fullMarathon', label: '全马', distance: 42.195 },
+]
+
+interface VDOTEntry {
+  vdot: number
+  pace5k: number
+  pace10k: number
+  paceHalf: number
+  paceFull: number
+}
+
+const vdotTable: VDOTEntry[] = [
+  { vdot: 30, pace5k: 288, pace10k: 306, paceHalf: 333, paceFull: 362 },
+  { vdot: 31, pace5k: 283, pace10k: 301, paceHalf: 327, paceFull: 356 },
+  { vdot: 32, pace5k: 278, pace10k: 296, paceHalf: 322, paceFull: 350 },
+  { vdot: 33, pace5k: 274, pace10k: 291, paceHalf: 316, paceFull: 344 },
+  { vdot: 34, pace5k: 269, pace10k: 286, paceHalf: 311, paceFull: 338 },
+  { vdot: 35, pace5k: 265, pace10k: 281, paceHalf: 306, paceFull: 333 },
+  { vdot: 36, pace5k: 261, pace10k: 277, paceHalf: 301, paceFull: 327 },
+  { vdot: 37, pace5k: 257, pace10k: 273, paceHalf: 296, paceFull: 322 },
+  { vdot: 38, pace5k: 253, pace10k: 268, paceHalf: 291, paceFull: 317 },
+  { vdot: 39, pace5k: 249, pace10k: 264, paceHalf: 287, paceFull: 312 },
+  { vdot: 40, pace5k: 245, pace10k: 260, paceHalf: 282, paceFull: 307 },
+  { vdot: 41, pace5k: 241, pace10k: 256, paceHalf: 278, paceFull: 302 },
+  { vdot: 42, pace5k: 238, pace10k: 252, paceHalf: 274, paceFull: 297 },
+  { vdot: 43, pace5k: 234, pace10k: 248, paceHalf: 269, paceFull: 292 },
+  { vdot: 44, pace5k: 231, pace10k: 244, paceHalf: 265, paceFull: 288 },
+  { vdot: 45, pace5k: 227, pace10k: 241, paceHalf: 261, paceFull: 283 },
+  { vdot: 46, pace5k: 224, pace10k: 237, paceHalf: 257, paceFull: 279 },
+  { vdot: 47, pace5k: 221, pace10k: 233, paceHalf: 253, paceFull: 275 },
+  { vdot: 48, pace5k: 218, pace10k: 230, paceHalf: 249, paceFull: 270 },
+  { vdot: 49, pace5k: 215, pace10k: 226, paceHalf: 245, paceFull: 266 },
+  { vdot: 50, pace5k: 212, pace10k: 223, paceHalf: 242, paceFull: 262 },
+  { vdot: 51, pace5k: 209, pace10k: 220, paceHalf: 238, paceFull: 258 },
+  { vdot: 52, pace5k: 206, pace10k: 216, paceHalf: 234, paceFull: 254 },
+  { vdot: 53, pace5k: 203, pace10k: 213, paceHalf: 231, paceFull: 250 },
+  { vdot: 54, pace5k: 200, pace10k: 210, paceHalf: 227, paceFull: 246 },
+  { vdot: 55, pace5k: 198, pace10k: 207, paceHalf: 224, paceFull: 243 },
+  { vdot: 56, pace5k: 195, pace10k: 204, paceHalf: 220, paceFull: 239 },
+  { vdot: 57, pace5k: 192, pace10k: 201, paceHalf: 217, paceFull: 235 },
+  { vdot: 58, pace5k: 190, pace10k: 198, paceHalf: 214, paceFull: 232 },
+  { vdot: 59, pace5k: 187, pace10k: 195, paceHalf: 210, paceFull: 228 },
+  { vdot: 60, pace5k: 185, pace10k: 192, paceHalf: 207, paceFull: 225 },
+  { vdot: 61, pace5k: 182, pace10k: 190, paceHalf: 204, paceFull: 221 },
+  { vdot: 62, pace5k: 180, pace10k: 187, paceHalf: 201, paceFull: 218 },
+  { vdot: 63, pace5k: 178, pace10k: 184, paceHalf: 198, paceFull: 215 },
+  { vdot: 64, pace5k: 175, pace10k: 182, paceHalf: 195, paceFull: 212 },
+  { vdot: 65, pace5k: 173, pace10k: 179, paceHalf: 192, paceFull: 209 },
+  { vdot: 66, pace5k: 171, pace10k: 177, paceHalf: 189, paceFull: 206 },
+  { vdot: 67, pace5k: 169, pace10k: 174, paceHalf: 186, paceFull: 203 },
+  { vdot: 68, pace5k: 166, pace10k: 172, paceHalf: 184, paceFull: 200 },
+  { vdot: 69, pace5k: 164, pace10k: 169, paceHalf: 181, paceFull: 197 },
+  { vdot: 70, pace5k: 162, pace10k: 167, paceHalf: 178, paceFull: 194 },
+  { vdot: 71, pace5k: 160, pace10k: 165, paceHalf: 176, paceFull: 191 },
+  { vdot: 72, pace5k: 158, pace10k: 162, paceHalf: 173, paceFull: 189 },
+  { vdot: 73, pace5k: 156, pace10k: 160, paceHalf: 171, paceFull: 186 },
+  { vdot: 74, pace5k: 154, pace10k: 158, paceHalf: 168, paceFull: 183 },
+  { vdot: 75, pace5k: 152, pace10k: 156, paceHalf: 166, paceFull: 181 },
+  { vdot: 76, pace5k: 150, pace10k: 154, paceHalf: 163, paceFull: 178 },
+  { vdot: 77, pace5k: 148, pace10k: 152, paceHalf: 161, paceFull: 176 },
+  { vdot: 78, pace5k: 146, pace10k: 150, paceHalf: 159, paceFull: 173 },
+  { vdot: 79, pace5k: 144, pace10k: 148, paceHalf: 156, paceFull: 171 },
+  { vdot: 80, pace5k: 142, pace10k: 146, paceHalf: 154, paceFull: 168 },
+]
+
+export function calculateVDOT(distanceKm: number, timeMinutes: number): number {
+  const paceSecPerKm = (timeMinutes / distanceKm) * 60
+  
+  let paceField: keyof VDOTEntry
+  if (distanceKm <= 5) paceField = 'pace5k'
+  else if (distanceKm <= 10) paceField = 'pace10k'
+  else if (distanceKm <= 21.0975) paceField = 'paceHalf'
+  else paceField = 'paceFull'
+  
+  for (let i = 1; i < vdotTable.length; i++) {
+    const prev = vdotTable[i - 1]
+    const curr = vdotTable[i]
+    
+    if (paceSecPerKm >= curr[paceField] && paceSecPerKm <= prev[paceField]) {
+      const range = prev[paceField] - curr[paceField]
+      const position = (paceSecPerKm - curr[paceField]) / range
+      const vdot = curr.vdot + (prev.vdot - curr.vdot) * position
+      return Math.round(vdot * 10) / 10
+    }
+  }
+  
+  if (paceSecPerKm <= vdotTable[vdotTable.length - 1][paceField]) {
+    return vdotTable[vdotTable.length - 1].vdot
+  }
+  
+  if (paceSecPerKm >= vdotTable[0][paceField]) {
+    return vdotTable[0].vdot
+  }
+  
+  return 50
+}
+
+function deriveTargetPace(distanceKm: number, vdot: number | null): string {
+  if (!vdot) return '\u2014'
+  
+  let paceSec: number
+  
+  for (let i = 0; i < vdotTable.length; i++) {
+    if (vdotTable[i].vdot === Math.round(vdot)) {
+      if (distanceKm <= 5) paceSec = vdotTable[i].pace5k
+      else if (distanceKm <= 10) paceSec = vdotTable[i].pace10k
+      else if (distanceKm <= 21.0975) paceSec = vdotTable[i].paceHalf
+      else paceSec = vdotTable[i].paceFull
+      return `~${formatPace(paceSec)}/km`
+    }
+    
+    if (i < vdotTable.length - 1) {
+      const curr = vdotTable[i]
+      const next = vdotTable[i + 1]
+      if (vdot >= curr.vdot && vdot <= next.vdot) {
+        const t = (vdot - curr.vdot) / (next.vdot - curr.vdot)
+        if (distanceKm <= 5) paceSec = Math.round(curr.pace5k + (next.pace5k - curr.pace5k) * t)
+        else if (distanceKm <= 10) paceSec = Math.round(curr.pace10k + (next.pace10k - curr.pace10k) * t)
+        else if (distanceKm <= 21.0975) paceSec = Math.round(curr.paceHalf + (next.paceHalf - curr.paceHalf) * t)
+        else paceSec = Math.round(curr.paceFull + (next.paceFull - curr.paceFull) * t)
+        return `~${formatPace(paceSec)}/km`
+      }
+    }
+  }
+  
   return '\u2014'
 }
 
-// Calculate personalized zones based on age
-function getPersonalizedZones(age: number) {
-  const maxHR = 220 - age
-  return [
-    { ...genericZones[0], hr: `${Math.round(maxHR * 0.50)}-${Math.round(maxHR * 0.59)}` },
-    { ...genericZones[1], hr: `${Math.round(maxHR * 0.60)}-${Math.round(maxHR * 0.66)}` },
-    { ...genericZones[2], hr: `${Math.round(maxHR * 0.67)}-${Math.round(maxHR * 0.73)}` },
-    { ...genericZones[3], hr: `${Math.round(maxHR * 0.74)}-${Math.round(maxHR * 0.80)}` },
-    { ...genericZones[4], hr: `${Math.round(maxHR * 0.81)}+` },
-  ]
-}
-
 export default function Profile() {
-  const { profile, updateProfile, trainingRecords, hasTrainingData } = useAppContext()
+  const { profile, updateProfile, trainingRecords, hasTrainingData, estimateVDOT } = useAppContext()
 
   // ---- State: Edit mode for Personal Info ----
   const [isEditing, setIsEditing] = useState(false)
@@ -114,6 +304,10 @@ export default function Profile() {
   const [editWeight, setEditWeight] = useState<number | string>('')
   const [editRunningYears, setEditRunningYears] = useState<number | string>('')
   const [editGoal, setEditGoal] = useState('')
+  const [editInjuryHistory, setEditInjuryHistory] = useState('')
+  const [editMaxTrainingDays, setEditMaxTrainingDays] = useState<number | string>(5)
+  const [editMaxSingleDistance, setEditMaxSingleDistance] = useState<number | string>(21)
+  const [editRestingHr, setEditRestingHr] = useState<number | string>('')
 
   // Validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -130,6 +324,10 @@ export default function Profile() {
       setEditWeight(profile.weight ?? '')
       setEditRunningYears(profile.runningYears ?? '')
       setEditGoal(profile.goal)
+      setEditInjuryHistory(profile.injuryHistory || '')
+      setEditMaxTrainingDays(profile.maxTrainingDaysPerWeek || 5)
+      setEditMaxSingleDistance(profile.maxSingleDistance || 21)
+      setEditRestingHr(profile.restingHr ?? '')
     }
   }, [])
 
@@ -166,8 +364,7 @@ export default function Profile() {
 
   const savePB = (distanceKey: string) => {
     let value = pbInputValue.trim()
-    const isMarathon = distanceKey === 'fullMarathon'
-    const pattern = isMarathon ? /^\d+:\d{2}:\d{2}$/ : /^\d{1,2}:\d{2}$/
+    const pattern = /^(\d+:)?\d{1,2}:\d{2}$/
     if (!pattern.test(value) && value !== '') {
       setEditingPB(null)
       return
@@ -184,9 +381,9 @@ export default function Profile() {
   const [raceDistance, setRaceDistance] = useState('5')
   const [raceTime, setRaceTime] = useState('')
   const [calculatedVdot, setCalculatedVdot] = useState<number | null>(null)
+  const [vdotMode, setVdotMode] = useState<'manual' | 'auto'>('manual')
 
-  // Get personalized zones or generic ones
-  const zones = profile.age != null ? getPersonalizedZones(profile.age) : genericZones
+  const zones = calculateTrainingZones(profile.age, profile.vdot, profile.restingHr)
 
   // ---- Handlers ----
 
@@ -198,6 +395,10 @@ export default function Profile() {
     setEditWeight(profile.weight ?? '')
     setEditRunningYears(profile.runningYears ?? '')
     setEditGoal(profile.goal)
+    setEditInjuryHistory(profile.injuryHistory || '')
+    setEditMaxTrainingDays(profile.maxTrainingDaysPerWeek || 5)
+    setEditMaxSingleDistance(profile.maxSingleDistance || 21)
+    setEditRestingHr(profile.restingHr ?? '')
     setFormErrors({})
     setIsEditing(true)
   }
@@ -240,6 +441,10 @@ export default function Profile() {
       weight: Number(editWeight),
       runningYears: editRunningYears ? Number(editRunningYears) : null,
       goal: editGoal || undefined,
+      injuryHistory: editInjuryHistory,
+      maxTrainingDaysPerWeek: Number(editMaxTrainingDays) || 5,
+      maxSingleDistance: Number(editMaxSingleDistance) || 21,
+      restingHr: editRestingHr ? Number(editRestingHr) : null,
     })
     setIsEditing(false)
     setFormErrors({})
@@ -270,12 +475,20 @@ export default function Profile() {
     }
   }
 
+  const handleAutoCalculateVDOT = () => {
+    const estimated = estimateVDOT()
+    if (estimated) {
+      setCalculatedVdot(estimated)
+    }
+  }
+
   const applyNewVDOT = () => {
     if (calculatedVdot) {
-      updateProfile({ vdot: calculatedVdot, vo2max: Math.round(calculatedVdot * 1.03 * 10) / 10 })
+      updateProfile({ vdot: calculatedVdot, vo2max: calculatedVdot })
       setShowVdotModal(false)
       setCalculatedVdot(null)
       setRaceTime('')
+      setVdotMode('manual')
     }
   }
 
@@ -291,12 +504,37 @@ export default function Profile() {
   const getStatsFromRecords = () => {
     if (trainingRecords.length === 0) return getEmptyStats()
 
-    const totalDistance = trainingRecords.reduce((sum, r) => sum + r.distance, 0).toFixed(1)
-    const maxDistance = Math.max(...trainingRecords.map((r) => r.distance)).toFixed(1)
-    const avgCalories = Math.round(trainingRecords.reduce((sum, r) => sum + r.calories, 0) / trainingRecords.length)
+    const now = new Date()
+    let filteredRecords = trainingRecords
 
-    // Average pace calc
-    const pacesWithValues = trainingRecords
+    switch (statsPeriod) {
+      case '7天':
+        filteredRecords = trainingRecords.filter(r => {
+          const recordDate = new Date(r.date)
+          return now.getTime() - recordDate.getTime() <= 7 * 24 * 60 * 60 * 1000
+        })
+        break
+      case '30天':
+        filteredRecords = trainingRecords.filter(r => {
+          const recordDate = new Date(r.date)
+          return now.getTime() - recordDate.getTime() <= 30 * 24 * 60 * 60 * 1000
+        })
+        break
+      case '12周':
+        filteredRecords = trainingRecords.filter(r => {
+          const recordDate = new Date(r.date)
+          return now.getTime() - recordDate.getTime() <= 12 * 7 * 24 * 60 * 60 * 1000
+        })
+        break
+    }
+
+    if (filteredRecords.length === 0) return getEmptyStats()
+
+    const totalDistance = filteredRecords.reduce((sum, r) => sum + r.distance, 0).toFixed(1)
+    const maxDistance = Math.max(...filteredRecords.map((r) => r.distance)).toFixed(1)
+    const avgCalories = Math.round(filteredRecords.reduce((sum, r) => sum + r.calories, 0) / filteredRecords.length)
+
+    const pacesWithValues = filteredRecords
       .filter((r) => r.avgPace && r.avgPace !== '-')
       .map((r) => {
         const parts = r.avgPace.split(':')
@@ -310,8 +548,8 @@ export default function Profile() {
       : '—'
 
     return [
-      { label: '总距离', value: `${totalDistance} km`, percent: Math.min(85, Math.round(totalDistance / 10)), fillClass: 'bg-primary-container' },
-      { label: '训练次数', value: `${trainingRecords.length} 次`, percent: Math.min(90, trainingRecords.length * 5), fillClass: 'bg-[#D97706]' },
+      { label: '总距离', value: `${totalDistance} km`, percent: Math.min(85, Math.round(parseFloat(totalDistance) / 10)), fillClass: 'bg-primary-container' },
+      { label: '训练次数', value: `${filteredRecords.length} 次`, percent: Math.min(90, filteredRecords.length * 5), fillClass: 'bg-[#D97706]' },
       { label: '最长距离', value: `${maxDistance} km`, percent: Math.min(70, parseFloat(maxDistance) * 4), fillClass: 'bg-status-success' },
       { label: '平均配速', value: avgPaceStr, percent: 0, fillClass: 'bg-tertiary-container' },
       { label: '消耗热量', value: `${avgCalories} kcal`, percent: Math.min(75, Math.round(avgCalories / 10)), fillClass: 'bg-status-warning' },
@@ -327,6 +565,7 @@ export default function Profile() {
 
   return (
     <>
+      <OnboardingGuide />
       {/* Page Header */}
       <h2 className="font-headline-xl text-headline-xl-mobile md:text-headline-xl text-text-primary mb-8">
         个人档案
@@ -335,7 +574,7 @@ export default function Profile() {
       <div className="grid grid-cols-12 gap-gutter">
 
         {/* ===== SECTION 1: Personal Info Card ===== */}
-        <div className="col-span-12 lg:col-span-8 p-stack-lg data-card relative">
+        <div className="col-span-12 lg:col-span-8 p-stack-lg data-card relative" id="profile-edit-section">
           {!isEditing ? (
             /* VIEW MODE — Profile complete */
             <div className="flex items-center gap-8">
@@ -371,6 +610,23 @@ export default function Profile() {
                   <div className="inline-flex items-center gap-2 bg-primary/10 px-3 py-1.5 rounded-lg mt-2">
                     <span className="material-symbols-outlined text-[16px] text-primary">flag</span>
                     <span className="font-body-sm font-medium text-primary">{profile.goal}</span>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                  {profile.maxTrainingDaysPerWeek && (
+                    <span className="font-body-xs text-secondary">每周 {profile.maxTrainingDaysPerWeek} 天训练</span>
+                  )}
+                  {profile.maxSingleDistance && (
+                    <span className="font-body-xs text-secondary">单次最长 {profile.maxSingleDistance}km</span>
+                  )}
+                  {profile.restingHr && (
+                    <span className="font-body-xs text-secondary">静息心率 {profile.restingHr} bpm</span>
+                  )}
+                </div>
+                {profile.injuryHistory && (
+                  <div className="flex items-start gap-1.5 mt-2">
+                    <span className="material-symbols-outlined text-[14px] text-status-warning mt-0.5">warning</span>
+                    <p className="font-body-xs text-secondary">{profile.injuryHistory}</p>
                   </div>
                 )}
               </div>
@@ -518,7 +774,7 @@ export default function Profile() {
                 </div>
 
                 {/* Goal (optional) */}
-                <div>
+                <div id="goal-selector">
                   <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
                     备赛目标 <span className="text-secondary font-normal">(选填)</span>
                   </label>
@@ -532,6 +788,68 @@ export default function Profile() {
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Injury History (optional) */}
+                <div>
+                  <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                    伤病史 <span className="text-secondary font-normal">(选填)</span>
+                  </label>
+                  <textarea
+                    value={editInjuryHistory}
+                    onChange={(e) => setEditInjuryHistory(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none transition-all font-body-sm resize-none"
+                    placeholder="例如：右膝髌腱炎（2023年）、足底筋膜炎"
+                    rows={2}
+                  />
+                </div>
+
+                {/* Training Days & Max Distance row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                      每周训练天数 <span className="text-secondary font-normal">(选填)</span>
+                    </label>
+                    <select
+                      value={editMaxTrainingDays}
+                      onChange={(e) => setEditMaxTrainingDays(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none transition-all cursor-pointer font-body-sm"
+                    >
+                      {[3, 4, 5, 6, 7].map(d => (
+                        <option key={d} value={d}>{d} 天</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                      单次最长距离 <span className="text-secondary font-normal">(km，选填)</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={editMaxSingleDistance}
+                      onChange={(e) => setEditMaxSingleDistance(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none transition-all font-body-sm"
+                      placeholder="21"
+                      min={3}
+                      max={50}
+                    />
+                  </div>
+                </div>
+
+                {/* Resting HR (optional) */}
+                <div>
+                  <label className="font-body-sm font-medium text-text-primary mb-1.5 block">
+                    静息心率 <span className="text-secondary font-normal">(选填，用于精准计算心率区间)</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={editRestingHr}
+                    onChange={(e) => setEditRestingHr(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none transition-all font-body-sm"
+                    placeholder="早晨静息心率（bpm），如 55"
+                    min={35}
+                    max={90}
+                  />
                 </div>
 
                 {/* Action buttons */}
@@ -560,7 +878,7 @@ export default function Profile() {
         </div>
 
         {/* ===== SECTION 2: VDOT / VO2max Section (conditional) ===== */}
-        <div className="col-span-12 lg:col-span-4 p-stack-lg flex flex-col data-card relative">
+        <div className="col-span-12 lg:col-span-4 p-stack-lg flex flex-col data-card relative" id="vdot-section">
           <p className="font-body-sm text-[13px] text-primary-container font-semibold mb-6 flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px]">speed</span>
             核心能力指标
@@ -638,44 +956,91 @@ export default function Profile() {
                 <h3 className="font-headline-md text-[18px] font-bold text-text-primary mb-4">
                   测算 VDOT
                 </h3>
-                <p className="text-sm text-secondary mb-4">
-                  输入最近的比赛成绩，系统将自动计算你的 VDOT 指数。
-                </p>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-text-primary mb-1">比赛距离 (km)</label>
-                    <select
-                      value={raceDistance}
-                      onChange={(e) => setRaceDistance(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none cursor-pointer"
-                    >
-                      <option value="5">5 公里</option>
-                      <option value="10">10 公里</option>
-                      <option value="21.0975">半程马拉松 (21.1km)</option>
-                      <option value="42.195">全程马拉松 (42.2km)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-text-primary mb-1">完赛时间</label>
-                    <input
-                      value={raceTime}
-                      onChange={(e) => setRaceTime(e.target.value)}
-                      placeholder="格式: MM:SS 或 H:MM:SS"
-                      className="w-full px-3 py-2 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none data-font"
-                    />
-                  </div>
-                  {calculatedVdot !== null && (
-                    <div className="bg-primary-container/10 rounded-lg p-3">
-                      <p className="text-sm text-secondary">计算结果</p>
-                      <p className="font-headline-xl text-[28px] font-bold text-primary-container">
-                        VDOT {calculatedVdot}
-                      </p>
-                      <p className="text-xs text-secondary mt-1">
-                        VO2max 约 {(calculatedVdot * 1.03).toFixed(1)} ml/kg/min
-                      </p>
-                    </div>
-                  )}
+                
+                {/* Mode Toggle */}
+                <div className="flex bg-surface-container-low rounded-lg p-1 mb-4">
+                  <button
+                    onClick={() => { setVdotMode('manual'); setCalculatedVdot(null); }}
+                    className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      vdotMode === 'manual' 
+                        ? 'bg-primary text-on-primary' 
+                        : 'text-text-primary hover:text-primary'
+                    }`}
+                  >
+                    输入PB计算
+                  </button>
+                  <button
+                    onClick={() => { setVdotMode('auto'); setCalculatedVdot(null); }}
+                    disabled={!hasTrainingData}
+                    className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      vdotMode === 'auto' 
+                        ? 'bg-primary text-on-primary' 
+                        : 'text-text-primary hover:text-primary'
+                    } ${!hasTrainingData ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    基于训练记录
+                  </button>
                 </div>
+
+                {vdotMode === 'manual' ? (
+                  <>
+                    <p className="text-sm text-secondary mb-4">
+                      输入最近的比赛成绩，系统将自动计算你的 VDOT 指数。
+                    </p>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-text-primary mb-1">比赛距离 (km)</label>
+                        <select
+                          value={raceDistance}
+                          onChange={(e) => setRaceDistance(e.target.value)}
+                          className="w-full px-3 py-2 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none cursor-pointer"
+                        >
+                          <option value="5">5 公里</option>
+                          <option value="10">10 公里</option>
+                          <option value="21.0975">半程马拉松 (21.1km)</option>
+                          <option value="42.195">全程马拉松 (42.2km)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-text-primary mb-1">完赛时间</label>
+                        <input
+                          value={raceTime}
+                          onChange={(e) => setRaceTime(e.target.value)}
+                          placeholder="格式: MM:SS 或 H:MM:SS"
+                          className="w-full px-3 py-2 bg-surface-container-low border border-border-subtle rounded-lg text-text-primary focus:ring-2 focus:ring-primary outline-none data-font"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-secondary mb-4">
+                      系统将分析你的训练记录，自动估算你的 VDOT 指数。
+                    </p>
+                    <div className="bg-surface-container-low rounded-lg p-4 mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined text-primary text-[24px]">trending_up</span>
+                        <div>
+                          <p className="text-sm font-medium text-text-primary">训练记录分析</p>
+                          <p className="text-xs text-secondary">已上传 {trainingRecords.length} 条训练记录</p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {calculatedVdot !== null && (
+                  <div className="bg-primary-container/10 rounded-lg p-3">
+                    <p className="text-sm text-secondary">计算结果</p>
+                    <p className="font-headline-xl text-[28px] font-bold text-primary-container">
+                      VDOT {calculatedVdot}
+                    </p>
+                    <p className="text-xs text-secondary mt-1">
+                      VO2max ≈ {calculatedVdot} ml/kg/min
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex gap-3 mt-6">
                   <button
                     onClick={() => setShowVdotModal(false)}
@@ -690,12 +1055,20 @@ export default function Profile() {
                     >
                       应用新值
                     </button>
-                  ) : (
+                  ) : vdotMode === 'manual' ? (
                     <button
                       onClick={handleCalculateVDOT}
                       className="flex-1 px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer"
                     >
                       计算
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleAutoCalculateVDOT}
+                      disabled={!hasTrainingData}
+                      className="flex-1 px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      开始分析
                     </button>
                   )}
                 </div>
@@ -705,7 +1078,7 @@ export default function Profile() {
         </div>
 
         {/* ===== SECTION 3: Training Zones (always visible, contextual) ===== */}
-        <div className="col-span-12 p-stack-lg data-card relative" ref={zoneTooltipRef}>
+        <div className="col-span-12 p-stack-lg data-card relative" ref={zoneTooltipRef} id="zones-section">
           <div className="flex items-center justify-between mb-6">
             <h4 className="font-headline-md text-[20px] font-bold text-text-primary">
               训练区间 (Zones)
@@ -820,8 +1193,8 @@ export default function Profile() {
                           if (e.key === 'Enter') savePB(dist.key)
                           if (e.key === 'Escape') setEditingPB(null)
                         }}
-                        className="data-font text-[15px] bg-surface-bright border-2 border-primary rounded px-2 py-0.5 w-24 focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        placeholder={dist.key === 'fullMarathon' ? 'H:MM:SS' : 'MM:SS'}
+                        className="data-font text-[15px] bg-surface-bright border-2 border-primary rounded px-2 py-0.5 w-28 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        placeholder="H:MM:SS"
                       />
                     ) : (
                       <span
@@ -835,7 +1208,7 @@ export default function Profile() {
                     )}
                   </td>
                   <td className="py-4 data-font text-[15px] text-primary-container font-semibold text-right">
-                    {deriveTargetPace(profile.goal)}
+                    {deriveTargetPace(dist.distance, profile.vdot)}
                   </td>
                 </tr>
               ))}

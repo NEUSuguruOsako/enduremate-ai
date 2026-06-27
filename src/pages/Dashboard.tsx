@@ -143,6 +143,7 @@ export default function Dashboard() {
     metrics,
     trainings,
     trainingRecords,
+    injuryRecords,
     hasTrainingData,
     isAIChatOpen,
     toggleAIChat,
@@ -151,6 +152,10 @@ export default function Dashboard() {
     nextWeek,
     prevWeek,
     currentWeek,
+    setDetailSourcePath,
+    decay,
+    decayDismissed,
+    dismissDecayNotice,
   } = useAppContext()
 
   const navigate = useNavigate()
@@ -169,6 +174,25 @@ export default function Dashboard() {
 
     const insights: InsightData[] = []
     const { ctl, atl, fatigueScore, weeklyDistance, injuryRisk } = metrics
+
+    // 洞察 0: 活跃伤病提醒（最高优先级）
+    const activeInjuries = injuryRecords.filter(r => !r.recovered)
+    if (activeInjuries.length > 0) {
+      const injuryParts = [...new Set(activeInjuries.flatMap(i => i.parts))]
+      const hasSevere = activeInjuries.some(i => i.severity === 'severe')
+      insights.push({
+        icon: 'healing',
+        iconColor: hasSevere ? 'text-status-danger' : 'text-status-warning',
+        title: `${hasSevere ? '严重' : '当前'}伤病：${injuryParts.join('、')}不适`,
+        description:
+          `你有 ${activeInjuries.length} 条未恢复的伤病记录，涉及 ${injuryParts.join('、')}。${
+            hasSevere
+              ? '存在严重伤病，强烈建议暂停高强度训练并就医检查。'
+              : '训练计划已自动调整，建议密切关注身体反应。'
+          }`,
+        aiQuestion: `我的伤病记录显示${injuryParts.join('、')}不适，请帮我分析如何安全训练并加速恢复？`,
+      })
+    }
 
     // 洞察 1: 疲劳评估
     if (fatigueScore !== null && fatigueScore > 60) {
@@ -294,7 +318,7 @@ export default function Dashboard() {
     }
 
     return insights.slice(0, 4)
-  }, [hasTrainingData, hasMetrics, metrics])
+  }, [hasTrainingData, hasMetrics, metrics, injuryRecords])
 
   // ---- 从 trainingRecords 构建图表数据 ----
   const chartBarData: ChartBarEntry[] = useMemo(() => {
@@ -373,6 +397,7 @@ export default function Dashboard() {
     const training = trainings.find((t) => t.id === trainingId)
     if (training) {
       selectTraining(training)
+      setDetailSourcePath('/')
       navigate('/detail')
     }
   }
@@ -413,6 +438,99 @@ export default function Dashboard() {
           </p>
         </div>
       </section>
+
+      {/* Fitness Decay Banner */}
+      {decay && decay.decayLevel !== 'none' && !decayDismissed && (
+        <section>
+          <div className={`rounded-lg p-4 flex items-start gap-3 ${
+            decay.decayLevel === 'severe'
+              ? 'bg-status-danger/5 border border-status-danger/20'
+              : decay.decayLevel === 'significant'
+                ? 'bg-status-warning/5 border border-status-warning/20'
+                : 'bg-primary/5 border border-primary/20'
+          }`}>
+            <span className={`material-symbols-outlined text-[22px] mt-0.5 ${
+              decay.decayLevel === 'severe' || decay.decayLevel === 'significant'
+                ? 'text-status-warning'
+                : 'text-primary'
+            }`}>
+              hourglass_bottom
+            </span>
+            <div className="flex-1">
+              <p className="font-body-sm font-semibold text-text-primary">
+                检测到训练中断
+              </p>
+              <p className="text-body-xs text-secondary mt-1">
+                距上次训练已过 <strong>{decay.gapDays}</strong> 天，你的运动水平有所下降。
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                <span className="text-xs text-secondary">
+                  VDOT：<strong>{decay.originalVDOT}</strong> → <strong className="text-status-warning">{decay.decayedVDOT}</strong>（-{decay.totalDecayPercent}%）
+                </span>
+                <span className="text-xs text-secondary">
+                  VO2max：<strong>-{decay.decayPercentage.vo2max}%</strong>
+                </span>
+                <span className="text-xs text-secondary">
+                  肌肉耐力：<strong>-{decay.decayPercentage.endurance}%</strong>
+                </span>
+              </div>
+              <p className="text-body-xs text-secondary mt-2">
+                已自动调整训练计划强度，建议先用 {decay.recoveryWeeks} 周低强度训练过渡恢复。
+              </p>
+            </div>
+            <button
+              onClick={dismissDecayNotice}
+              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors cursor-pointer border-none bg-transparent"
+            >
+              <span className="material-symbols-outlined text-[18px] text-tertiary">close</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Active Injuries Banner */}
+      {injuryRecords.filter(r => !r.recovered).length > 0 && (
+        <section>
+          <div className="bg-status-warning/5 border border-status-warning/20 rounded-lg p-4 flex items-start gap-3">
+            <span className="material-symbols-outlined text-[22px] text-status-warning mt-0.5">healing</span>
+            <div className="flex-1">
+              <p className="font-body-sm font-semibold text-text-primary">
+                活跃伤病记录
+              </p>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {injuryRecords.filter(r => !r.recovered).slice(0, 5).map(injury => (
+                  <span
+                    key={injury.id}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
+                      injury.severity === 'severe'
+                        ? 'bg-status-danger/10 text-status-danger'
+                        : injury.severity === 'moderate'
+                          ? 'bg-status-warning/10 text-status-warning'
+                          : 'bg-status-success/10 text-status-success'
+                    }`}
+                  >
+                    {injury.parts.join('、')}
+                    <span className="opacity-60">
+                      {injury.severity === 'severe' ? '严重' : injury.severity === 'moderate' ? '中度' : '轻微'}
+                    </span>
+                  </span>
+                ))}
+              </div>
+              {injuryRecords.filter(r => !r.recovered).length > 0 && (
+                <p className="font-body-xs text-secondary mt-2">
+                  训练计划已根据伤病情况自动调整 · 点击查看详情
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => navigate('/analysis')}
+              className="text-xs text-primary font-medium hover:underline shrink-0 cursor-pointer border-none bg-transparent"
+            >
+              查看
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* ======================== */}
       {/* 2. Three Metric Cards     */}
@@ -673,7 +791,7 @@ export default function Dashboard() {
                   上传数据后自动生成，或手动创建训练日程
                 </p>
                 <button
-                  onClick={() => navigate('/analysis')}
+                  onClick={() => navigate('/training')}
                   className="px-4 py-1.5 text-xs font-semibold text-primary bg-primary/10 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-none"
                 >
                   开始创建

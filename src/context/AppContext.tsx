@@ -3,9 +3,12 @@ import {
   useContext,
   useState,
   useCallback,
+  useMemo,
   useEffect,
   type ReactNode,
 } from 'react'
+import { calculateVDOT } from '../pages/Profile'
+import { calculateFitnessDecay, type FitnessDecayResult } from '../services/fitnessDecay'
 
 // ========================
 // 类型定义
@@ -22,13 +25,18 @@ export interface UserProfile {
   goal: string
   vdot: number | null
   vo2max: number | null
+  // PRD 扩展字段
+  injuryHistory: string
+  restingHr: number | null      // 静息心率 bpm
+  maxTrainingDaysPerWeek: number | null
+  maxSingleDistance: number | null
 }
 
 export interface TrainingItem {
   id: string
   day: string
   title: string
-  type: 'rest' | 'easy' | 'tempo' | 'interval' | 'lsd' | 'strength'
+  type: 'rest' | 'easy' | 'tempo' | 'interval' | 'lsd' | 'strength' | 'progression' | 'fartlek' | 'hill'
   distance?: number
   duration?: number
   pace?: string
@@ -52,6 +60,13 @@ export interface TrainingRecord {
   calories: number
   fileName?: string
   sourceFileId?: string
+  // PRD 扩展字段
+  dynamics?: RunningDynamics
+  laps?: LapData[]
+  timeSeries?: TimeSeriesPoint[]
+  injuryParts?: InjuryBodyPart[]
+  injurySeverity?: string
+  injuryDescription?: string
 }
 
 export interface AIMessage {
@@ -69,6 +84,9 @@ export interface TrainingMetrics {
   fatigueScore: number | null
   weeklyDistance: number | null
   totalRuns: number | null
+  riskMessages?: string[]  // PRD 5.1 风险消息
+  activeInjuryParts?: string[]  // 当前活跃伤病部位（全局同步）
+  activeInjuryCount?: number    // 活跃伤病数量
 }
 
 export interface UploadedFile {
@@ -77,6 +95,83 @@ export interface UploadedFile {
   size: string
   date: string
   parsedRecords: TrainingRecord[]
+}
+
+// ========================
+// 扩展类型定义（PRD 功能支持）
+// ========================
+
+/** 单圈数据 */
+export interface LapData {
+  lapIndex: number
+  distance: number       // km
+  duration: number       // seconds
+  avgPace: number        // sec/km
+  avgHr?: number
+  maxHr?: number
+}
+
+/** 时间序列数据点 */
+export interface TimeSeriesPoint {
+  time: number           // 时间（秒）- 用于图表 X 轴
+  timeSec: number        // 距离开始的秒数
+  distance: number       // km
+  pace?: number          // 实时配速 sec/km
+  hr?: number            // 心率 bpm
+  heartRate?: number     // 心率 bpm (兼容)
+  cadence?: number       // 步频 spm
+  elevation?: number     // 海拔 m
+  altitude?: number      // 海拔 m (兼容)
+  lat?: number
+  lon?: number
+}
+
+/** 跑步动力学数据 */
+export interface RunningDynamics {
+  cadence: number        // 平均步频 spm
+  avgCadence?: number    // 平均步频 spm (兼容)
+  strideLength: number   // 平均步幅 m
+  avgStepLength?: number // 平均步幅 m (兼容)
+  verticalOscillation?: number  // 垂直振幅 cm
+  avgVerticalOscillation?: number
+  verticalRatio?: number
+  avgVerticalRatio?: number
+  groundContactTime?: number    // 触地时间 ms
+  avgStanceTime?: number
+  power?: number          // 跑步功率 W
+  avgPower?: number
+  maxPower?: number
+  totalAscent?: number
+  totalDescent?: number
+  avgTemperature?: number
+}
+
+/** 伤痛部位 */
+export type InjuryBodyPart =
+  | 'knee' | 'ankle' | 'achilles' | 'shin' | 'calf'
+  | 'hamstring' | 'quadriceps' | 'hip' | 'foot' | 'lower_back'
+  | 'groin' | 'it_band' | 'plantar'
+  | '膝盖' | '小腿' | '足底' | '跟腱' | '髋部'
+  | '脚踝' | '臀部' | '腰部' | '其他'
+
+/** 伤痛记录 */
+export interface InjuryRecord {
+  id: string
+  date: string
+  parts: InjuryBodyPart[]
+  severity: 'mild' | 'moderate' | 'severe'
+  description: string
+  trainingId?: string   // 关联的训练 ID
+  recovered: boolean
+}
+
+/** 训练聊天消息（用于 TrainingAnalysis 的 per-training 聊天） */
+export interface TrainingChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+  isStreaming?: boolean
 }
 
 interface AppState {
@@ -93,6 +188,10 @@ interface AppState {
   uploadedFiles: UploadedFile[]
   isProfileComplete: boolean
   hasTrainingData: boolean
+  injuryRecords: InjuryRecord[]  // 伤痛记录
+  detailSourcePath: string  // 训练详情页的来源页面路径
+  decay: FitnessDecayResult | null  // 水平衰减评估结果
+  decayDismissed: boolean  // 衰减弹窗是否已被关闭
 }
 
 interface AppContextValue extends AppState {
@@ -115,9 +214,70 @@ interface AppContextValue extends AppState {
   updateProfile: (updates: Partial<UserProfile>) => void
   unreadNotifications: number
   setUnreadNotifications: (n: number) => void
-
   /** 从上传文件解析训练记录并更新所有相关数据 */
   processParsedData: (records: TrainingRecord[], fileId: string) => void
+  /** 基于训练记录估算VDOT */
+  estimateVDOT: () => number | null
+  /** AI生成训练计划并设置 */
+  generateAndSetTrainingPlan: () => void
+  /** 更新训练项 */
+  updateTraining: (id: string, updates: Partial<TrainingItem>) => void
+  /** 删除训练项 */
+  deleteTraining: (id: string) => void
+  // PRD 扩展方法
+  addTraining: (training: TrainingItem) => void
+  setTrainings: React.Dispatch<React.SetStateAction<TrainingItem[]>>
+  addInjuryRecord: (record: Omit<InjuryRecord, 'id'>) => void
+  updateInjuryRecord: (id: string, updates: Partial<InjuryRecord>) => void
+  updateRecordInjury: (recordId: string, injury: { parts: InjuryBodyPart[]; severity: string; description: string }) => void
+  setDetailSourcePath: (path: string) => void
+  planAutoGenerated: boolean
+  setPlanAutoGenerated: React.Dispatch<React.SetStateAction<boolean>>
+  autoGenReason: string
+  setAutoGenReason: React.Dispatch<React.SetStateAction<string>>
+  dismissAutoGenNotice: () => void
+  decay: FitnessDecayResult | null
+  decayDismissed: boolean
+  dismissDecayNotice: () => void
+}
+
+// ========================
+// localStorage 持久化工具
+// ========================
+
+const STORAGE_KEY = 'enduremate_data'
+
+interface StoredData {
+  profile: UserProfile
+  trainings: TrainingItem[]
+  trainingRecords: TrainingRecord[]
+  injuryRecords: InjuryRecord[]
+  uploadedFiles: UploadedFile[]
+  currentPhase: number
+  currentWeek: number
+  planAutoGenerated: boolean
+  autoGenReason: string
+}
+
+function loadFromStorage(): StoredData | null {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY)
+    if (data) {
+      const parsed = JSON.parse(data)
+      return parsed
+    }
+  } catch {
+    console.error('Failed to load data from localStorage')
+  }
+  return null
+}
+
+function saveToStorage(data: StoredData): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch {
+    console.error('Failed to save data to localStorage')
+  }
 }
 
 // ========================
@@ -135,6 +295,10 @@ const emptyProfile: UserProfile = {
   goal: '',
   vdot: null,
   vo2max: null,
+  injuryHistory: '',
+  restingHr: null,
+  maxTrainingDaysPerWeek: null,
+  maxSingleDistance: null,
 }
 
 const emptyMetrics: TrainingMetrics = {
@@ -293,6 +457,46 @@ function generateRealisticDate(): string {
   return date.toISOString().split('T')[0]
 }
 
+function generateTimeSeries(distance: number, totalSeconds: number, avgPaceSec: number, avgHr: number, maxHr: number): TimeSeriesPoint[] {
+  const points: TimeSeriesPoint[] = []
+  const numPoints = Math.max(30, Math.min(200, Math.round(totalSeconds / 3)))
+  
+  const elevationBase = Math.floor(Math.random() * 100)
+  
+  for (let i = 0; i < numPoints; i++) {
+    const progress = i / (numPoints - 1)
+    const timeSec = Math.round(progress * totalSeconds)
+    const distKm = Math.round(progress * distance * 10) / 10
+    
+    const paceVariation = Math.sin(progress * Math.PI * 4 + Math.random() * 0.5) * 15 + (Math.random() - 0.5) * 20
+    const currentPace = Math.max(180, Math.min(480, avgPaceSec + paceVariation))
+    
+    const hrVariation = Math.sin(progress * Math.PI * 6 + Math.random()) * 8 + (Math.random() - 0.5) * 6
+    const currentHr = Math.max(avgHr - 15, Math.min(maxHr + 5, avgHr + hrVariation))
+    
+    const cadenceBase = Math.round(160 + Math.random() * 30)
+    const cadenceVariation = Math.sin(progress * Math.PI * 8) * 5 + (Math.random() - 0.5) * 8
+    const currentCadence = Math.max(140, Math.min(200, cadenceBase + cadenceVariation))
+    
+    const elevationVariation = Math.sin(progress * Math.PI * 3) * 15 + Math.sin(progress * Math.PI * 7) * 8
+    const currentElevation = Math.max(0, elevationBase + elevationVariation)
+
+    points.push({
+      time: timeSec,
+      timeSec,
+      distance: distKm,
+      pace: currentPace,
+      heartRate: Math.round(currentHr),
+      hr: Math.round(currentHr),
+      cadence: Math.round(currentCadence),
+      altitude: Math.round(currentElevation),
+      elevation: Math.round(currentElevation),
+    })
+  }
+  
+  return points
+}
+
 export function parseTrainingFile(
   fileName: string,
 ): TrainingRecord[] {
@@ -348,6 +552,9 @@ export function parseTrainingFile(
   // 生成真实日期
   const dateStr = generateRealisticDate()
 
+  // 生成逐点时间序列数据
+  const timeSeries = distance > 0 ? generateTimeSeries(distance, totalSeconds, avgPaceSec, avgHr, maxHr) : undefined
+
   return [
     {
       id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -360,6 +567,7 @@ export function parseTrainingFile(
       maxHr,
       calories,
       fileName,
+      timeSeries,
     },
   ]
 }
@@ -368,17 +576,41 @@ export function parseTrainingFile(
 // 指标计算器（基于训练记录动态计算）
 // ========================
 
-function calculateMetrics(records: TrainingRecord[]): TrainingMetrics {
+function calculateMetrics(records: TrainingRecord[], injuryRecords?: InjuryRecord[]): TrainingMetrics {
   if (records.length === 0) return { ...emptyMetrics }
 
   const now = new Date()
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
   const recentRecords = records.filter((r) => new Date(r.date) >= weekAgo)
+  const previousWeekRecords = records.filter((r) => {
+    const d = new Date(r.date)
+    return d >= twoWeeksAgo && d < weekAgo
+  })
   const allRecords = records
 
   // 周跑量
   const weeklyDistance = recentRecords.reduce((sum, r) => sum + r.distance, 0)
+  const previousWeeklyDistance = previousWeekRecords.reduce((sum, r) => sum + r.distance, 0)
+
+  // 周跑量增幅风险检测（PRD 5.1）
+  const riskMessages: string[] = []
+  if (previousWeeklyDistance > 0) {
+    const increase = ((weeklyDistance - previousWeeklyDistance) / previousWeeklyDistance) * 100
+    if (increase > 15) {
+      riskMessages.push(`⚠️ 周跑量增幅 ${increase.toFixed(1)}% 超过 15%，伤病风险显著上升`)
+    }
+  }
+
+  // 连续高强度训练检测（只检查最近两周内的数据）
+  const twoWeekRecords = records.filter((r) => new Date(r.date) >= twoWeeksAgo)
+  const recentHighIntensityCount = twoWeekRecords.filter((r) =>
+    r.type.includes('间歇') || r.type.includes('阈值') || r.type.includes('节奏'),
+  ).length
+  if (recentHighIntensityCount >= 2) {
+    riskMessages.push('⚠️ 近期高强度训练频率较高，建议安排恢复跑或休息')
+  }
 
   // 总训练次数
   const totalRuns = allRecords.length
@@ -399,13 +631,48 @@ function calculateMetrics(records: TrainingRecord[]): TrainingMetrics {
   }, 0)
   const atl = Math.round(atlRaw)
 
-  // 疲劳分
-  const fatigueScore = atl !== null && ctl !== null ? Math.round(Math.max(0, ((atl - ctl) / ctl) * 50 + 40)) : null
+  // 疲劳分：只有当CTL大于0时才计算，避免除以0的情况
+  const fatigueScore = atl !== null && ctl !== null && ctl > 0 
+    ? Math.round(Math.max(0, ((atl - ctl) / ctl) * 50 + 40)) 
+    : null
 
   // 伤病风险
   let injuryRisk: TrainingMetrics['injuryRisk'] = '低风险'
-  if (!fatigueScore || fatigueScore > 75) injuryRisk = '高风险'
-  else if (fatigueScore > 55) injuryRisk = '中风险'
+  // 只有当有有效数据时才进行风险评估
+  if (fatigueScore !== null) {
+    if (fatigueScore > 75) injuryRisk = '高风险'
+    else if (fatigueScore > 55) injuryRisk = '中风险'
+  } else if (records.length === 0) {
+    // 无训练记录时显示无数据
+    injuryRisk = '无数据'
+  } else if (ctl === 0 || ctl === null) {
+    // 有记录但CTL为0（近期无训练），风险应为低风险
+    injuryRisk = '低风险'
+  }
+
+  // 如果有风险消息，提升风险等级
+  if (riskMessages.length > 0 && injuryRisk === '低风险') {
+    injuryRisk = '中风险'
+  }
+
+  // 纳入伤病记录的风险评估
+  let activeInjuryParts: string[] = []
+  let activeInjuryCount = 0
+  if (injuryRecords && injuryRecords.length > 0) {
+    const activeInjuries = injuryRecords.filter(r => !r.recovered)
+    activeInjuryCount = activeInjuries.length
+    activeInjuryParts = [...new Set(activeInjuries.flatMap(r => r.parts))]
+
+    // 活跃伤病提升风险等级
+    if (activeInjuryCount > 0 && injuryRisk === '低风险') {
+      const hasSevere = activeInjuries.some(r => r.severity === 'severe')
+      injuryRisk = hasSevere ? '高风险' : '中风险'
+    }
+    if (activeInjuryCount >= 3) {
+      injuryRisk = '高风险'
+      riskMessages.push(`⚠️ 存在 ${activeInjuryCount} 处活跃伤病（${activeInjuryParts.join('、')}），强烈建议降低训练强度`)
+    }
+  }
 
   return {
     ctl,
@@ -414,104 +681,122 @@ function calculateMetrics(records: TrainingRecord[]): TrainingMetrics {
     fatigueScore,
     weeklyDistance: weeklyDistance || null,
     totalRuns,
+    riskMessages: riskMessages.length > 0 ? riskMessages : undefined,
+    activeInjuryParts: activeInjuryParts.length > 0 ? activeInjuryParts : undefined,
+    activeInjuryCount: activeInjuryCount > 0 ? activeInjuryCount : undefined,
   }
+}
+
+// ========================
+// VDOT 估算工具（基于训练记录）
+// ========================
+
+/**
+ * 基于训练记录估算 VDOT
+ * 分析用户的训练数据，找到各距离下的最佳表现，然后换算成等效VDOT
+ */
+export function estimateVDOTFromRecords(records: TrainingRecord[]): number | null {
+  if (records.length === 0) return null
+
+  // 过滤出有效的跑步记录（有配速数据且距离>0）
+  const validRecords = records.filter(r => 
+    r.distance > 0 && r.avgPace && r.avgPace !== '-'
+  )
+
+  if (validRecords.length === 0) return null
+
+  // 将配速字符串转换为秒/公里
+  function parsePace(paceStr: string): number {
+    const parts = paceStr.split(':')
+    if (parts.length === 2) {
+      return parseInt(parts[0]) * 60 + parseInt(parts[1])
+    }
+    return 0
+  }
+
+  // 找到各距离范围的最佳配速（取最快的3次平均）
+  const groupedRecords: Record<string, { distance: number; paceSec: number }[]> = {
+    short: [],   // 3-8km (接近5K)
+    medium: [],  // 8-16km (接近10K)
+    long: [],    // 16-28km (接近半马)
+    marathon: [], // 28+km (全马范围)
+  }
+
+  for (const record of validRecords) {
+    const paceSec = parsePace(record.avgPace)
+    if (paceSec === 0) continue
+    if (record.distance < 3) continue
+
+    if (record.distance <= 8) {
+      groupedRecords.short.push({ distance: record.distance, paceSec })
+    } else if (record.distance <= 16) {
+      groupedRecords.medium.push({ distance: record.distance, paceSec })
+    } else if (record.distance <= 28) {
+      groupedRecords.long.push({ distance: record.distance, paceSec })
+    } else {
+      groupedRecords.marathon.push({ distance: record.distance, paceSec })
+    }
+  }
+
+  // 获取每组中最快的N次的平均配速
+  function getBestAveragePace(group: { distance: number; paceSec: number }[], minCount: number = 1) {
+    if (group.length < minCount) return null
+    // 按配速排序（越快越靠前）
+    const sorted = [...group].sort((a, b) => a.paceSec - b.paceSec)
+    // 取最快的3次或全部（如果少于3次）
+    const take = Math.min(3, sorted.length)
+    const best = sorted.slice(0, take)
+    const avgPace = best.reduce((sum, r) => sum + r.paceSec, 0) / best.length
+    const avgDistance = best.reduce((sum, r) => sum + r.distance, 0) / best.length
+    return { distance: avgDistance, paceSec: avgPace }
+  }
+
+  // 计算各距离的等效VDOT，然后取加权平均值
+  const vdotCandidates: { vdot: number; weight: number }[] = []
+
+  // 标准距离定义
+  const standardDistances = {
+    short: { targetDist: 5, minRecords: 1, weight: 1.0 },
+    medium: { targetDist: 10, minRecords: 1, weight: 0.8 },
+    long: { targetDist: 21.0975, minRecords: 1, weight: 0.6 },
+    marathon: { targetDist: 42.195, minRecords: 1, weight: 0.4 },
+  }
+
+  for (const [key, config] of Object.entries(standardDistances)) {
+    const best = getBestAveragePace(groupedRecords[key as keyof typeof groupedRecords], config.minRecords)
+    if (best) {
+      // 使用Jack Daniels标准距离进行配速校正
+      const vdot = calculateVDOT(best.distance, (best.paceSec * best.distance) / 60)
+      if (vdot >= 25 && vdot <= 85) {
+        vdotCandidates.push({ vdot, weight: config.weight })
+      }
+    }
+  }
+
+  if (vdotCandidates.length === 0) return null
+
+  // 计算加权平均值
+  let weightedSum = 0
+  let totalWeight = 0
+  
+  vdotCandidates.forEach(({ vdot, weight }) => {
+    weightedSum += vdot * weight
+    totalWeight += weight
+  })
+
+  const estimatedVDOT = Math.round((weightedSum / totalWeight) * 10) / 10
+  
+  return estimatedVDOT
 }
 
 // ========================
 // AI 动态回复引擎（基于实际数据）
 // ========================
 
-function generateDynamicAIReply(
-  userMessage: string,
-  context: {
-    profile: UserProfile
-    metrics: TrainingMetrics
-    records: TrainingRecord[]
-    files: UploadedFile[]
-  },
-): string {
-  const { profile, metrics, records, files } = context
-  const name = profile.name || '跑友'
-
-  // 快捷问题精确匹配
-  if (userMessage.includes('整体训练状态')) {
-    if (records.length === 0) {
-      return `你好 ${name}！\n\n目前你还没有任何训练记录。要开始使用，请先在「分析中心」上传你的运动数据文件（支持 FIT/GPX/TCX 格式）。\n\n上传后我会帮你做全面分析！`
-    }
-
-    const recentWeek = records.filter((r) => {
-      const d = new Date(r.date)
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      return d >= weekAgo
-    })
-
-    return `你好 ${name}！以下是你当前的训练状态分析：\n\n**本周概况**\n- 训练次数：${recentWeek.length} 次\n- 累计跑量：${metrics.weeklyDistance ?? 0} km\n- 平均配速：${recentWeek.length > 0 ? (recentWeek.reduce((s, r) => s + parseFloat(r.avgPace.split(':')[0]) * 60 + parseFloat(r.avgPace.split(':')[1]), 0) / recentWeek.length / 60).toFixed(1) : '-'} min/km\n\n**体能指标**\n- CTL（长期负荷）：${metrics.ctl ?? '-'}\n- ATL（短期负荷）：${metrics.atl ?? '-'}\n- 伤病风险：${metrics.injuryRisk}\n\n${metrics.injuryRisk === '高风险' ? '\n⚠️ 当前伤病风险偏高，建议适当降低训练强度。' : ''}\n\n需要我针对某个方面给出具体建议吗？`
-  }
-
-  if (userMessage.includes('训练负荷')) {
-    if (metrics.ctl === null) {
-      return `目前还没有足够的训练数据来评估负荷。请先上传至少 1 周的运动数据。`
-    }
-    return `你的训练负荷分析如下：\n\n| 指标 | 数值 | 解读 |\n|------|------|------|\n| CTL 长期负荷 | ${metrics.ctl} | ${metrics.ctl < 50 ? '偏低，有氧基础待建立' : metrics.ctl < 80 ? '正常范围' : '较高，注意恢复'} |\n| ATL 短期负荷 | ${metrics.atl} | ${metrics.atl! < metrics.ctl! ? '低于CTL，处于正向适应中' : '高于CTL，近期强度较大'} |\n| 疲劳评分 | ${metrics.fatigueScore} | ${metrics.fatigueScore! < 45 ? '状态良好' : metrics.fatigueScore! < 65 ? '轻度疲劳' : '需要注意恢复'} |\n| 伤病风险 | ${metrics.injuryRisk} | - |\n\n${metrics.injuryRisk === '高风险' ? '\n🔴 建议：接下来 2 天安排休息或极低强度活动。' : metrics.injuryRisk === '中风险' ? '\n🟡 建议：适当减少下次训练的强度或距离。' : '\n🟢 当前负荷健康，继续保持！'}`
-  }
-
-  if (userMessage.includes('有氧') && userMessage.includes('速度')) {
-    if (records.length === 0) {
-      return '目前还没有训练数据。上传数据后我可以根据你的实际情况给出更有针对性的建议。\n\n一般来说，马拉松备赛应遵循"先有氧后速度"的原则。'
-    }
-    const easyCount = records.filter((r) => r.type.includes('轻松') || r.type.includes('LSD')).length
-    const hardCount = records.filter((r) =>
-      r.type.includes('间歇') || r.type.includes('阈值') || r.type.includes('节奏'),
-    ).length
-    const ratio = easyCount / Math.max(records.length, 1)
-
-    return `基于你最近的 ${records.length} 条训练记录分析：\n\n**当前训练结构**\n- 有氧类训练占比：${(ratio * 100).toFixed(0)}%\n- 强度类训练次数：${hardCount} 次\n\n**建议方向**：\n${ratio < 0.7
-      ? '你的有氧基础训练比例偏低。建议增加每周 1-2 次轻松跑/LSD，有氧是速度的基础。'
-      : ratio > 0.85
-        ? '有氧基础不错，可以逐步引入更多强度训练（Tempo 或间歇），提升比赛配速能力。'
-        : '当前有氧与强度的配比比较均衡，继续保持即可。'}\n\n目标：全马破3 需要在保持有氧的同时，逐步提高乳酸阈值配速。`
-  }
-
-  if (userMessage.includes('疲劳')) {
-    if (metrics.fatigueScore === null) {
-      return '暂无疲劳数据。上传训练记录后我可以帮你监控疲劳趋势。'
-    }
-    return `你的疲劳管理分析：\n\n**当前疲劳指数：${metrics.fatigueScore}/100**\n\n${metrics.fatigueScore < 35
-      ? '🟢 状态很好，身体恢复充分，适合安排高质量训练课。'
-      : metrics.fatigueScore < 55
-        ? '🟡 轻度疲劳积累，属于正常训练反应。建议保证睡眠和营养。'
-        : metrics.fatigueScore < 75
-          ? '🔴 中度疲劳，建议将下次高强度训练降为中等强度，或增加休息日。'
-          : '⛔ 重度疲劳警告！建议完全休息 1-2 天，必要时就医检查。'}\n\n**恢复建议**：\n- 保证每晚 7-8 小时睡眠\n- 训练后 30 分钟内补充蛋白质+碳水\n- 每周至少 1 次泡沫轴/拉伸放松`
-  }
-
-  if (userMessage.includes('误区') || userMessage.includes('新手')) {
-    return `马拉松备赛常见误区：\n\n**1. 跑量增长过快**\n> 每周增幅不超过 10%，否则伤病风险急剧上升\n\n**2. 忽视力量训练**\n> 核心和下肢力量不足是跑步伤病的头号元凶，建议每周 1-2 次\n\n**3. LSD 追求速度**\n> 长距离慢跑的核心是"慢"，配速应比目标马拉松配速慢 30-60 秒/km\n\n**4. 赛前减量太晚**\n> 全马建议赛前 2-3 周开始减量至原量的 40-60%\n\n**5. 只堆跑量不重质量**\n> 10 个垃圾跑量不如 1 个高质量 Tempo\n\n**6. 轻视恢复**\n> 训练只是刺激，休息才是进步的时刻`
-  }
-
-  // 文件上传后的自动分析
-  if (files.length > 0 && (userMessage.includes('文件') || userMessage.includes('上传') || userMessage.includes('分析'))) {
-    const latestFile = files[files.length - 1]
-    const fileRecords = latestFile.parsedRecords
-    return `已为你分析最新上传的文件 **${latestFile.name}**：\n\n**解析结果**\n- 文件包含 ${fileRecords.length} 条训练记录\n- 最近一次训练：${fileRecords[fileRecords.length - 1]?.type}\n- 距离：${fileRecords[fileRecords.length - 1]?.distance} km\n- 平均心率：${fileRecords[fileRecords.length - 1]?.avgHr} bpm\n- 配速：${fileRecords[fileRecords.length - 1]?.avgPace}/km\n\n**数据质量**：✅ 心率数据完整 ✅ 配速区间正常\n\n${fileRecords.some((r) => r.avgHr > 175) ? '\n⚠️ 注意：部分训练平均心率超过 175bpm，注意控制强度。' : ''}\n\n需要我进一步分析这条训练数据吗？`
-  }
-
-  // 通用智能回复 — 根据上下文生成
-  const hasData = records.length > 0
-  const hasProfile = profile.name !== ''
-
-  if (!hasData && !hasProfile) {
-    return `欢迎来到 EndureMate AI！我是你的专属跑步训练助手。\n\n我注意到你还是新用户，建议你先完成以下步骤：\n\n1️⃣ **填写个人档案** → 去「个人档案」页设置你的基本信息和训练目标\n2️⃣ **上传运动数据** → 在「分析中心」上传 FIT/GPX/TCX 文件\n3️⃣ **开始对话** → 上传数据后我可以给你专业的训练分析和建议\n\n有什么想问的吗？`
-  }
-
-  if (!hasData) {
-    return `感谢提问，${name}！\n\n你已经设置了个人档案，但目前还没有训练数据。\n\n请在「分析中心」页面上传你的运动设备导出的文件（支持 Garmin .fit、Strava .gpx、Coros .tcx 等）。\n\n上传后我就能帮你：\n- 分析训练负荷和疲劳度\n- 评估伤病风险\n- 给出针对性的训练建议\n- 追踪长期进步趋势\n\n准备好了就告诉我！`
-  }
-
-  // 有数据时的通用回复
-  const lastRecord = records[0]
-  return `收到你的问题，${name}！\n\n结合你最近的训练数据来看：\n\n**最近一次训练** (${lastRecord.date})\n- 类型：${lastRecord.type}\n- 距离：${lastRecord.distance} km\n- 配速：${lastRecord.avgPace}/km\n- 平均心率：${lastRecord.avgHr} bpm\n\n**整体趋势**\n- 累计训练 ${records.length} 次\n- 当前 CTL：${metrics.ctl}\n- 伤病风险：${metrics.injuryRisk}\n\n如果你有具体的训练疑问（比如某次训练是否达标、如何调整计划等），可以直接问我，我会结合你的数据给出针对性回答。`
-}
+// 共享 Mock 回复模块（与 AIAssistant 共用）
+import { generateDynamicAIReply } from '../services/mockReplies'
+// 训练计划生成器
+import { generateTrainingPlan, getRecommendedTemplate } from '../services/trainingPlanGenerator'
 
 let messageIdCounter = 0
 
@@ -526,19 +811,99 @@ function generateMsgId(): string {
 const AppContext = createContext<AppContextValue | undefined>(undefined)
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // ---- 状态：全部为空 ----
-  const [profile, setProfile] = useState<UserProfile>({ ...emptyProfile })
-  const [trainings, setTrainings] = useState<TrainingItem[]>([])
-  const [trainingRecords, setTrainingRecords] = useState<TrainingRecord[]>([])
+  const storedData = loadFromStorage()
+
+  // ---- 状态：从localStorage加载或使用默认值 ----
+  const [profile, setProfile] = useState<UserProfile>(
+    storedData?.profile || { ...emptyProfile }
+  )
+  const [trainings, setTrainings] = useState<TrainingItem[]>(
+    storedData?.trainings || []
+  )
+  const [trainingRecords, setTrainingRecords] = useState<TrainingRecord[]>(
+    storedData?.trainingRecords || []
+  )
   const [aiMessages, setAiMessages] = useState<AIMessage[]>([])
   const [isAIChatOpen, setIsAIChatOpen] = useState(false)
   const [selectedTraining, setSelectedTraining] = useState<TrainingItem | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<TrainingRecord | null>(null)
   const [metrics, setMetrics] = useState<TrainingMetrics>({ ...emptyMetrics })
-  const [currentPhase, setCurrentPhase] = useState(0)
-  const [currentWeek, setCurrentWeek] = useState(1)
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [currentPhase, setCurrentPhase] = useState(
+    storedData?.currentPhase ?? 0
+  )
+  const [currentWeek, setCurrentWeek] = useState(
+    storedData?.currentWeek ?? 1
+  )
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(
+    storedData?.uploadedFiles || []
+  )
   const [unreadNotifications, setUnreadNotifications] = useState(0)
+  const [injuryRecords, setInjuryRecords] = useState<InjuryRecord[]>(
+    storedData?.injuryRecords || []
+  )
+  const [detailSourcePath, setDetailSourcePath] = useState('')
+  const [planAutoGenerated, setPlanAutoGenerated] = useState(
+    storedData?.planAutoGenerated ?? false
+  )
+  const [autoGenReason, setAutoGenReason] = useState(
+    storedData?.autoGenReason ?? ''
+  )
+  const [decayDismissed, setDecayDismissed] = useState(false)
+
+  // ---- 衰减评估：基于训练记录和训练计划实时计算 ----
+  const decay = useMemo(() => {
+    return calculateFitnessDecay(profile, trainingRecords, trainings)
+  }, [profile.vdot, profile.age, profile.runningYears, trainingRecords.length, trainings.length])
+
+  // ---- 控制器 ----
+  const dismissDecayNotice = useCallback(() => {
+    setDecayDismissed(true)
+  }, [])
+
+  // ---- 初始化：从加载的数据计算指标 ----
+  useEffect(() => {
+    if (trainingRecords.length > 0) {
+      setMetrics(calculateMetrics(trainingRecords, injuryRecords))
+    }
+  }, [])
+
+  // ---- 自动训练计划生成（15条训练记录后触发） ----
+  const AUTO_GEN_THRESHOLD = 15
+  useEffect(() => {
+    if (
+      trainingRecords.length >= AUTO_GEN_THRESHOLD &&
+      trainings.length === 0 &&
+      profile.goal &&
+      profile.goal !== ''
+    ) {
+      const template = getRecommendedTemplate(profile.goal, profile, decay?.decayLevel)
+      const effectiveVDOT = decay?.decayedVDOT ?? profile.vdot
+      const newPlan = generateTrainingPlan(template, profile, undefined, injuryRecords, effectiveVDOT ?? undefined)
+      setTrainings(newPlan)
+      setPlanAutoGenerated(true)
+      const decayNote = decay
+        ? `（因距上次训练已过 ${decay.gapDays} 天，已按衰减后水平 VDOT ${decay.decayedVDOT} 调整强度）`
+        : ''
+      setAutoGenReason(
+        `检测到你已有 ${trainingRecords.length} 条训练记录，系统已根据你的 VDOT（${effectiveVDOT ?? '待评估'}）和目标「${profile.goal}」自动生成训练计划。${decayNote}`
+      )
+    }
+  }, [trainingRecords.length])
+
+  // ---- 持久化：数据变化时保存到localStorage ----
+  useEffect(() => {
+    saveToStorage({
+      profile,
+      trainings,
+      trainingRecords,
+      injuryRecords,
+      uploadedFiles,
+      currentPhase,
+      currentWeek,
+      planAutoGenerated,
+      autoGenReason,
+    })
+  }, [profile, trainings, trainingRecords, injuryRecords, uploadedFiles, currentPhase, currentWeek, planAutoGenerated, autoGenReason])
 
   // 派生状态
   const isProfileComplete =
@@ -584,6 +949,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         metrics,
         records: trainingRecords,
         files: uploadedFiles,
+        injuryRecords,
+        decay,
       })
       let charIndex = 0
       const charsPerTick = Math.max(2, Math.floor(fullReply.length / 30))
@@ -610,7 +977,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }, 40)
     },
-    [profile, metrics, trainingRecords, uploadedFiles],
+    [profile, metrics, trainingRecords, uploadedFiles, injuryRecords],
   )
 
   const updateTrainingFeedback = useCallback(
@@ -644,24 +1011,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setTrainingRecords((prev) => {
         const updated = [newRecord, ...prev]
-        // 自动重新计算指标
-        setMetrics(calculateMetrics(updated))
+        // 自动重新计算指标（含伤病数据）
+        setMetrics(calculateMetrics(updated, injuryRecords))
         return updated
       })
     },
-    [],
+    [injuryRecords],
   )
 
   // 核心：处理上传文件解析后的数据
   const processParsedData = useCallback(
-    (records: TrainingRecord[], fileId: string) => {
+    (records: TrainingRecord[], _fileId: string) => {
       setTrainingRecords((prev) => {
         const updated = [...records, ...prev]
-        setMetrics(calculateMetrics(updated))
+        setMetrics(calculateMetrics(updated, injuryRecords))
+        
+        if (profile.vdot === null || profile.vdot === undefined) {
+          const estimatedVDOT = estimateVDOTFromRecords(updated)
+          if (estimatedVDOT !== null) {
+            setProfile((currentProfile) => ({
+              ...currentProfile,
+              vdot: estimatedVDOT,
+              vo2max: estimatedVDOT,
+            }))
+          }
+        }
+        
         return updated
       })
     },
-    [],
+    [profile.vdot, injuryRecords],
   )
 
   const setPhase = useCallback((phase: number) => {
@@ -688,9 +1067,107 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProfile((prev) => ({ ...prev, ...updates }))
   }, [])
 
-  // ---- Context Value ----
+  // ---- PRD 扩展方法 ----
 
-  const value: AppContextValue = {
+  const addTraining = useCallback((training: TrainingItem) => {
+    setTrainings((prev) => [...prev, training])
+  }, [])
+
+  const generateAndSetTrainingPlan = useCallback(() => {
+    const template = getRecommendedTemplate(profile.goal, profile, decay?.decayLevel)
+    const newPlan = generateTrainingPlan(template, profile, undefined, injuryRecords, decay?.decayedVDOT)
+    setTrainings(newPlan)
+  }, [profile, injuryRecords, decay])
+
+  const updateTraining = useCallback((id: string, updates: Partial<TrainingItem>) => {
+    setTrainings((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
+    )
+  }, [])
+
+  const deleteTraining = useCallback((id: string) => {
+    setTrainings((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
+  const addInjuryRecord = useCallback(
+    (record: Omit<InjuryRecord, 'id'>) => {
+      const newRecord: InjuryRecord = {
+        ...record,
+        id: `injury_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      }
+      setInjuryRecords((prev) => [newRecord, ...prev])
+    },
+    [],
+  )
+
+  const updateInjuryRecord = useCallback(
+    (id: string, updates: Partial<InjuryRecord>) => {
+      setInjuryRecords((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+      )
+    },
+    [],
+  )
+
+  const updateRecordInjury = useCallback(
+    (recordId: string, injury: { parts: InjuryBodyPart[]; severity: string; description: string }) => {
+      // 1. 预计算新的 InjuryRecord（用于metrics重算）
+      let newInjuryRecord: InjuryRecord | null = null
+      if (injury.parts.length > 0) {
+        const severityMap: Record<string, 'mild' | 'moderate' | 'severe'> = {
+          '轻微': 'mild',
+          '中等': 'moderate',
+          '严重': 'severe',
+        }
+        const record = trainingRecords.find(r => r.id === recordId)
+        newInjuryRecord = {
+          id: `injury_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          date: record?.date || new Date().toISOString().split('T')[0],
+          parts: injury.parts,
+          severity: severityMap[injury.severity] || 'mild',
+          description: injury.description,
+          trainingId: recordId,
+          recovered: false,
+        }
+      }
+
+      // 合并伤病记录（包含即将新增的）用于metrics重算
+      const futureInjuryRecords = newInjuryRecord
+        ? [newInjuryRecord, ...injuryRecords]
+        : injuryRecords
+
+      // 2. 更新训练记录 + 自动重算指标（含伤病数据）
+      setTrainingRecords((prev) => {
+        const updated = prev.map((r) =>
+          r.id === recordId
+            ? {
+                ...r,
+                injuryParts: injury.parts,
+                injurySeverity: injury.severity,
+                injuryDescription: injury.description,
+              }
+            : r,
+        )
+        setMetrics(calculateMetrics(updated, futureInjuryRecords))
+        return updated
+      })
+
+      // 3. 如果有不适部位，创建全局 InjuryRecord（伤病同步全局）
+      if (newInjuryRecord) {
+        setInjuryRecords((prev) => [newInjuryRecord!, ...prev])
+      }
+    },
+    [trainingRecords, injuryRecords],
+  )
+
+  const dismissAutoGenNotice = useCallback(() => {
+    setPlanAutoGenerated(false)
+    setAutoGenReason('')
+  }, [])
+
+  // ---- Context Value (useMemo 避免不必要重渲染) ----
+
+  const value: AppContextValue = useMemo(() => ({
     profile,
     trainings,
     trainingRecords,
@@ -705,6 +1182,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     uploadedFiles,
     isProfileComplete,
     hasTrainingData,
+    injuryRecords,
+    detailSourcePath,
     toggleAIChat,
     sendAIMessage,
     updateTrainingFeedback,
@@ -721,7 +1200,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     unreadNotifications,
     setUnreadNotifications,
     processParsedData,
-  }
+    estimateVDOT: () => estimateVDOTFromRecords(trainingRecords),
+    generateAndSetTrainingPlan,
+    updateTraining,
+    deleteTraining,
+    addTraining,
+    setTrainings,
+    addInjuryRecord,
+    updateInjuryRecord,
+    updateRecordInjury,
+    setDetailSourcePath,
+    planAutoGenerated,
+    setPlanAutoGenerated,
+    autoGenReason,
+    setAutoGenReason,
+    dismissAutoGenNotice,
+    decay,
+    decayDismissed,
+    dismissDecayNotice,
+  }), [
+    profile, trainings, trainingRecords, aiMessages, setAiMessages,
+    isAIChatOpen, selectedTraining, selectedRecord, metrics,
+    currentPhase, currentWeek, uploadedFiles,
+    isProfileComplete, hasTrainingData, injuryRecords, detailSourcePath,
+    toggleAIChat, sendAIMessage, updateTrainingFeedback, completeTraining,
+    selectTraining, selectRecord, addTrainingRecord, setPhase,
+    nextWeek, prevWeek, addUploadedFile, removeUploadedFile,
+    updateProfile, unreadNotifications, setUnreadNotifications,
+    processParsedData, trainingRecords, addTraining, setTrainings,
+    addInjuryRecord, updateInjuryRecord, updateRecordInjury, setDetailSourcePath,
+    planAutoGenerated, setPlanAutoGenerated, autoGenReason, setAutoGenReason, dismissAutoGenNotice,
+    decay, decayDismissed, dismissDecayNotice,
+  ])
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
