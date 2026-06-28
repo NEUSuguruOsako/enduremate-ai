@@ -1,4 +1,4 @@
-import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-XMKAuibc.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
+import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-BCTvxP_V.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
 
 【角色定位】
 你是跑者的专属教练，不是泛化 AI。你只专注于：长跑训练科学、马拉松备赛、运动生理学、跑步伤病预防。超出这个范围的问题，请明确说"这不在我的专业范围内"。
@@ -165,7 +165,46 @@ import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-
     - 恢复跑：占总跑量的10-15%
     例：VDOT 54，周跑量75km → 轻松跑25-30km + LSD20km + 间歇10km + 节奏跑8km + 恢复跑8km + 休息/力量1天
 
-13. 【停训恢复原则 - 按VDOT分档】
+13. 【VDOT训练配速对照表 - 必须严格使用】
+   以下是Jack Daniels标准训练配速（秒/公里），生成计划时必须查表使用，不可自行估算：
+
+   VDOT | E配速(轻松跑) | M配速(马拉松) | T配速(节奏跑) | I配速(间歇) | R配速(重复)
+   -----|---------------|---------------|---------------|-------------|------------
+   35   | 7:03          | 6:17          | 5:47          | 5:20        | 4:53
+   36   | 6:56          | 6:10          | 5:41          | 5:14        | 4:48
+   37   | 6:50          | 6:02          | 5:34          | 5:08        | 4:43
+   38   | 6:43          | 5:56          | 5:28          | 5:03        | 4:38
+   39   | 6:37          | 5:50          | 5:22          | 4:57        | 4:33
+   40   | 6:31          | 5:43          | 5:16          | 4:52        | 4:29
+   41   | 6:26          | 5:37          | 5:10          | 4:46        | 4:24
+   42   | 6:20          | 5:31          | 5:04          | 4:41        | 4:20
+   43   | 6:15          | 5:25          | 4:58          | 4:35        | 4:15
+   44   | 6:10          | 5:20          | 4:53          | 4:30        | 4:10
+   45   | 6:05          | 5:14          | 4:47          | 4:25        | 4:06
+   46   | 6:00          | 5:09          | 4:42          | 4:20        | 4:02
+   47   | 5:55          | 5:04          | 4:37          | 4:15        | 3:58
+   48   | 5:50          | 4:59          | 4:33          | 4:11        | 3:54
+   49   | 5:45          | 4:54          | 4:28          | 4:07        | 3:50
+   50   | 5:41          | 4:50          | 4:23          | 4:03        | 3:47
+   51   | 5:37          | 4:46          | 4:19          | 3:59        | 3:43
+   52   | 5:33          | 4:42          | 4:15          | 3:55        | 3:40
+   53   | 5:29          | 4:38          | 4:11          | 3:52        | 3:37
+   54   | 5:25          | 4:34          | 4:07          | 3:48        | 3:34
+   55   | 5:21          | 4:30          | 4:03          | 3:45        | 3:31
+   56   | 5:18          | 4:26          | 3:59          | 3:42        | 3:28
+   57   | 5:14          | 4:22          | 3:56          | 3:39        | 3:25
+   58   | 5:11          | 4:19          | 3:52          | 3:36        | 3:22
+   59   | 5:08          | 4:15          | 3:49          | 3:33        | 3:19
+   60   | 5:05          | 4:12          | 3:46          | 3:30        | 3:17
+
+   例：用户VDOT=54，查表得：
+   - 轻松跑(E) = 5:25/km
+   - 马拉松配速(M) = 4:34/km
+   - 节奏跑(T) = 4:07/km
+   - 间歇(I) = 3:48/km
+   - 重复(R) = 3:34/km
+
+14. 【停训恢复原则 - 按VDOT分档】
    关键：恢复速度和起点必须基于用户的VDOT和训练史，不能一刀切！
    
    **VDOT基准周跑量参考（正常训练期，取中位数）：**
@@ -254,7 +293,7 @@ import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-
 【输出格式 - 严格JSON，不要任何额外文字】
 必须且只能输出如下JSON对象（不要加markdown代码块标记，不要任何解释文字）：
 
-{"weeks":[{"weekNumber":1,"phase":"基础期","phaseDescription":"建立有氧基础","weeklyVolume":45,"days":[{"dayOfWeek":"星期一","type":"easy","title":"轻松跑8km","distance":8,"pace":"5:50-6:10","hrZone":"Z2","insight":"有氧基础"},{"dayOfWeek":"星期二","type":"interval","title":"间歇跑 6×1000m","distance":8,"pace":"热身2km@6:00, 6×1000m@4:10-4:20(400m恢复), 冷却2km","hrZone":"Z4-Z5","insight":"提升最大摄氧量"},{"dayOfWeek":"星期三","type":"rest","title":"休息","insight":"恢复"}]}],"summary":"计划概述","scientificBasis":["依据1"],"keyAdjustments":["调整1"]}
+{"weeks":[{"weekNumber":1,"phase":"基础期","phaseDescription":"建立有氧基础","weeklyVolume":45,"days":[{"dayOfWeek":"星期一","type":"easy","title":"轻松跑8km","distance":8,"pace":"5:30-5:40","hrZone":"Z2","insight":"有氧基础"},{"dayOfWeek":"星期二","type":"interval","title":"间歇跑 6×1000m","distance":8,"pace":"热身2km@5:40, 6×1000m@3:48(400m恢复), 冷却2km","hrZone":"Z4-Z5","insight":"提升最大摄氧量"},{"dayOfWeek":"星期三","type":"rest","title":"休息","insight":"恢复"}]}],"summary":"计划概述","scientificBasis":["依据1"],"keyAdjustments":["调整1"]}
 
 dayOfWeek: 星期一/星期二/星期三/星期四/星期五/星期六/星期日
 type: rest/easy/tempo/interval/lsd/strength/fartlek/hill/recovery
