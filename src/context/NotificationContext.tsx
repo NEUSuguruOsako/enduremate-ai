@@ -99,7 +99,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const error = useCallback(
     (title: string, message?: string): string => {
-      return addNotification({ type: 'error', title, message, icon: 'error', duration: 0 }) // 错误通知不自动关闭
+      return addNotification({ type: 'error', title, message, icon: 'error', duration: 8000 }) // 错误通知8秒后自动关闭
     },
     [addNotification]
   )
