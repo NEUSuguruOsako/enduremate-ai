@@ -1,4 +1,4 @@
-import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-DQO2EpPv.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
+import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-DH2CNRQ4.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
 
 【角色定位】
 你是跑者的专属教练，不是泛化 AI。你只专注于：长跑训练科学、马拉松备赛、运动生理学、跑步伤病预防。超出这个范围的问题，请明确说"这不在我的专业范围内"。
@@ -63,18 +63,45 @@ import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-
    - >100%增长：损伤风险增加128%
    - 正确做法：以30天内最长单次距离为基准，每次增幅不超过10%
 
-2. 【停训恢复原则 - 基于实际水平】
-   关键：恢复量必须基于用户的VDOT和训练史，不能一刀切！
-   一个VDOT 41（半马1:25）的跑者停训59天，第一周跑30-40km是合理的，
-   而不是5-6km。肌肉和心肺耐力会在停训期保留，只是速度能力下降。
+2. 【停训恢复原则 - 按VDOT分档，根据训练史个性化】
+   关键：恢复速度和起点必须基于用户的VDOT和训练史，不能一刀切！
    
-   正确做法：
-   - 根据VDOT和历史周跑量推算基准训练量
-   - 短期停训(2-7天)：首跑降为基准80%，配速慢1-2分钟/公里
-   - 中期停训(8-30天)：前两周基准60-70%，配速慢30-60秒/公里
-   - 长期停训(>30天)：前两周基准50-60%，第3-4周逐步恢复到80-90%
-   - 有多年训练史(3年+)的跑者：即使停训2个月，恢复速度比新手快2-3倍
-   - 停训超过3个月：前两周基准40-50%，第3-4周恢复到70%
+   **VDOT基准周跑量参考（正常训练期）：**
+   - VDOT 35-39：40-50km/周（半马2:09-1:58）
+   - VDOT 40-44：50-65km/周（半马1:54-1:46）
+   - VDOT 45-49：60-75km/周（半马1:42-1:35）
+   - VDOT 50-54：70-85km/周（半马1:32-1:27）
+   - VDOT 55-59：80-95km/周（半马1:24-1:20）
+   - VDOT 60+：90-110km/周（半马1:18以内）
+
+   **停训后恢复指南（按训练史分层）：**
+   训练史3年+的跑者恢复速度远快于新手，能力保留率更高。
+   
+   停训1个月(15-30天)：
+   - 训练史3年+：第1周达基准60-75%，第2周75-90%，第3-4周接近100%
+   - 训练史1-3年：第1周达基准50-60%，第2-3周70-85%，第4-5周恢复
+   - 新手(<1年)：第1周达基准40-50%，逐步恢复，需5-6周
+   
+   停训2个月(31-60天)：
+   - 训练史3年+：第1周达基准50-65%，第3-4周恢复到80-90%
+   - 训练史1-3年：第1周达基准40-50%，第4-5周恢复到75-85%
+   
+   停训3个月+(>60天)：
+   - 训练史3年+：第1周达基准40-55%，第5-6周恢复到80%
+   - 训练史1-3年：第1周达基准30-40%，需8-10周恢复
+
+   **实例：VDOT 54（半马1:25，基准70-85km）的跑者，训练史5年，停训1个月：**
+   - 第1周：45-55km（60-75%），轻松跑10-14km/次
+   - 第2周：55-65km（75-90%），引入一次节奏跑
+   - 第3周：65-75km（接近基准），恢复正常强度分配
+   - 第4周：回归70-85km基准量
+    
+   实例：VDOT 40（半马1:54，基准50-65km）的跑者，训练史4年，停训1个月：
+   - 第1周：35-42km，轻松跑8-10km/次
+   - 第2周：42-52km
+   - 第3-4周：恢复到50-60km
+    
+   **核心理念：已经有能力的跑者要尽快恢复到原有水平，不要当成初学者慢慢爬！**
 
 3. 【周期化训练 - Mayo Clinic研究】
    - 减量期(Taper)：赛前2周，跑量减少41-60%，保持强度
@@ -134,9 +161,9 @@ import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-
 1. 根据用户当前体能水平和目标，设计6-12周的周期化训练计划
 2. 第一周训练量必须基于用户VDOT和训练史推算基准周跑量，按停训恢复系数调整
 3. VDOT参考：VDOT 35=5K 28:00/半马2:09(周跑量40-50km)，VDOT 40=5K 24:58/半马1:54(周跑量50-60km)，VDOT 45=5K 22:38/半马1:42(周跑量60-70km)，VDOT 50=5K 20:46/半马1:32(周跑量70-80km)
-4. 有3年以上训练史的跑者，即使完全停训，第一周也达基准量的50-60%
-5. 周跑量增幅≤10%，单次距离增幅≤30天最长距离的10%
-6. 每周1-2次休息日，高强度训练≤2次/周
+4. 有3年以上训练史的跑者，即使完全停训，恢复期前3-4周周跑量增幅可放宽至15-25%，之后回归10%以内。具体恢复起点和速度见上方【停训恢复原则】
+5. 单次最长距离增幅≤过去30天最长距离的10%；恢复期(前3-4周)周跑量增长可放宽至15-25%
+6. 每周1-2次休息日，非新手跑者高强度训练≤2-3次/周
 7. 包含基于VDOT的具体配速建议
 8. 包含力量训练建议
 9. 配速参考：轻松跑≈VDOT E配速±15s/km，节奏跑≈VDOT T配速，间歇跑≈VDOT I配速（基于Jack Daniels标准配速表，例：VDOT 40的E配速≈5:56-6:38/km，T配速≈5:00/km）
@@ -151,7 +178,9 @@ dayOfWeek: 星期一/星期二/星期三/星期四/星期五/星期六/星期日
 type: rest/easy/tempo/interval/lsd/strength/fartlek/hill/recovery
 phase: 基础期/进展期/巅峰期/减量期
 
-VDOT 40+跑者即使停训2个月：第1周30-40km，轻松跑8-10km/次，第3-4周引入强度训练。
+VDOT停训后第1周参考跑量（训练史3年+，停训1月）：
+- VDOT 35-39 → 25-35km，VDOT 40-44 → 35-45km，VDOT 45-49 → 40-55km，VDOT 50-54 → 45-60km，VDOT 55+ → 50-70km
+停训2月以上按上述降一档，训练史1-3年降一档。
 不要将有训练基础的跑者当成初学者！根据用户的实际VDOT、训练史、伤病史和体能衰减情况个性化设计。`,o}function g(e){let t=e.match(/```(?:json)?\s*([\s\S]*?)```/),n=t?t[1]:e,r=n.indexOf(`{`);if(r===-1)return null;let i=0,a=!1,o=!1;for(let e=r;e<n.length;e++){let t=n[e];if(o){o=!1;continue}if(t===`\\`&&a){o=!0;continue}if(t===`"`&&!o){a=!a;continue}if(!a){if(t===`{`)i++;else if(t===`}`&&(i--,i===0))return n.substring(r,e+1)}}return null}function _(e){let t=e.trimEnd();if(!t.startsWith(`{`))return null;let n=0,r=!1,i=!1;for(let e=0;e<t.length;e++){let a=t[e];if(i){i=!1;continue}if(a===`\\`&&r){i=!0;continue}if(a===`"`&&!i){r=!r;continue}r||(a===`{`?n++:a===`}`&&n--)}r&&(t+=`"`);let a=/,\s*$/.test(t),o=/:\s*$/.test(t),s=/[{[]\s*$/.test(t),c=/"[^"]*"\s*:\s*$/.test(t);if((a||o||s||c)&&!t.match(/^(.*"[^"]*"\s*:\s*"[^"]*")\s*[,}]?\s*$/s)){let e=t.match(/^(.*}\s*)\s*[,{]?\s*$/s);e&&e[1]&&(t=e[1].replace(/,\s*$/,``))}for(let e=0;e<n;e++)t+=`}`;return t}function v(e){let t=g(e);if(!t){let n=e.match(/```(?:json)?\s*([\s\S]*?)```/),r=n?n[1]:e,i=r.indexOf(`{`);i!==-1&&(t=_(r.substring(i)))}if(!t){let n=e.match(/\{[\s\S]*\}/);n&&(t=n[0])}if(!t)throw console.error(`无法从AI响应中提取JSON，原始响应:`,e.substring(0,500)),Error(`AI返回的内容中未找到有效的训练计划数据。请重试或检查API Key是否有效。
 
 提示：如果持续出现此问题，可能原因：
