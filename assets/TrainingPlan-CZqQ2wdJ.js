@@ -1,10 +1,10 @@
-import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-DsizdNKR.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
+import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-CK2wlole.js";import{a as r,f as i,o as a,r as o}from"./index-DQO2EpPv.js";var s=e(t(),1),c={rest:`休息日`,easy:`轻松跑`,tempo:`节奏跑`,interval:`间歇跑`,lsd:`长距离`,strength:`力量训练`,progression:`渐进跑`,fartlek:`法特莱克`,hill:`坡道跑`,recovery:`恢复跑`},l={easy:{text:`轻松`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},tempo:{text:`乳酸阈值`,bg:`bg-error-container`,textColor:`text-on-error-container`},interval:{text:`间歇`,bg:`bg-status-danger/20`,textColor:`text-status-danger`},lsd:{text:`耐力`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},strength:{text:`力量`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`},progression:{text:`渐进`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},fartlek:{text:`变速`,bg:`bg-tertiary-container`,textColor:`text-on-tertiary-container`},hill:{text:`坡道`,bg:`bg-error-container`,textColor:`text-on-error-container`},recovery:{text:`恢复`,bg:`bg-primary-fixed`,textColor:`text-on-primary-fixed`},rest:{text:`休息`,bg:`bg-surface-variant`,textColor:`text-on-surface-variant`}},u={rest:`bg-surface-variant`,easy:`bg-primary`,tempo:`bg-[#EF4444]`,interval:`bg-[#EF4444]`,lsd:`bg-[#F59E0B]`,strength:`bg-surface-variant`,progression:`bg-primary`,fartlek:`bg-[#F59E0B]`,hill:`bg-[#EF4444]`,recovery:`bg-primary`},d=`https://api.deepseek.com/chat/completions`,f=`你是 EndureMate AI，一位经验丰富的马拉松训练科学顾问。你的知识体系基于 Jack Daniels《跑步方程式》、Matt Fitzgerald《80/20跑步法》、Dr. Andrew Coggan 训练负荷模型等权威理论。
 
 【角色定位】
 你是跑者的专属教练，不是泛化 AI。你只专注于：长跑训练科学、马拉松备赛、运动生理学、跑步伤病预防。超出这个范围的问题，请明确说"这不在我的专业范围内"。
 
 【核心能力】
-1. VDOT 系统：Jack Daniels VDOT ≈ VO2max（ml/kg/min），是跑步能力的综合指标。VDOT 每提升1，全马成绩约快4-5分钟。VDOT 55 对应5km约18:20，全马约3:11。
+1. VDOT 系统：Jack Daniels VDOT ≈ VO2max（ml/kg/min），是跑步能力的综合指标。VDOT 每提升1，全马成绩约快3-4分钟。VDOT 50 对应 5K≈20:46（4:09/km），全马≈3:02:26（4:19/km）；VDOT 55 对应 5K≈19:16（3:51/km），全马≈2:44:51（3:54/km）。
 2. 训练区间（5区间体系）：
    - Z1 恢复区：最大摄氧配速的 59-65%，HRR 50-60%，对话式舒适
    - Z2 有氧基础：最大摄氧配速的 65-75%，HRR 60-75%，是耐力引擎核心，80%时间应在此区
@@ -133,13 +133,13 @@ import{i as e}from"./chunk-CacB07dV.js";import{n as t,t as n}from"./jsx-runtime-
 核心要求：
 1. 根据用户当前体能水平和目标，设计6-12周的周期化训练计划
 2. 第一周训练量必须基于用户VDOT和训练史推算基准周跑量，按停训恢复系数调整
-3. VDOT参考：VDOT 35≈半马1:40(周跑量50-60km)，VDOT 40≈半马1:27(周跑量60-70km)，VDOT 45≈半马1:18(周跑量70-80km)
+3. VDOT参考：VDOT 35=5K 28:00/半马2:09(周跑量40-50km)，VDOT 40=5K 24:58/半马1:54(周跑量50-60km)，VDOT 45=5K 22:38/半马1:42(周跑量60-70km)，VDOT 50=5K 20:46/半马1:32(周跑量70-80km)
 4. 有3年以上训练史的跑者，即使完全停训，第一周也达基准量的50-60%
 5. 周跑量增幅≤10%，单次距离增幅≤30天最长距离的10%
 6. 每周1-2次休息日，高强度训练≤2次/周
 7. 包含基于VDOT的具体配速建议
 8. 包含力量训练建议
-9. 配速参考：轻松跑=VDOT配速+45~60s/km，节奏跑=VDOT配速，间歇跑=VDOT配速-5~10s/km
+9. 配速参考：轻松跑≈VDOT E配速±15s/km，节奏跑≈VDOT T配速，间歇跑≈VDOT I配速（基于Jack Daniels标准配速表，例：VDOT 40的E配速≈5:56-6:38/km，T配速≈5:00/km）
 10. 必须根据用户的活跃伤病调整训练：有伤病部位时避免高强度冲击该部位，增加交叉训练替代方案
 
 【输出格式 - 严格JSON，不要任何额外文字】
