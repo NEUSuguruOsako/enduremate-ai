@@ -248,7 +248,6 @@ interface AppContextValue extends AppState {
 // ========================
 
 const STORAGE_KEY = 'enduremate_data'
-const STORAGE_MAX_SIZE = 4.5 * 1024 * 1024 // 4.5MB 警戒线（localStorage 上限约 5MB）
 const STORAGE_LIGHT_KEY = 'enduremate_data_light' // 精简存储的备份 key
 
 interface StoredData {
